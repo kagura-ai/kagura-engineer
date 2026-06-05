@@ -121,6 +121,15 @@ def check_haiku() -> CheckResult:
 def check_memory_cloud(base_url: str) -> CheckResult:
     try:
         _http_reach(f"{base_url.rstrip('/')}/health")
+    except urllib.error.HTTPError as exc:
+        # An HTTP response (even 4xx/5xx) proves the host is reachable; this is a
+        # reachability probe, not an auth/health check. Full authed recall smoke is Plan 3.
+        return CheckResult(
+            "memory-cloud",
+            Status.WARN,
+            f"reachable but /health returned HTTP {exc.code}",
+            "auth/endpoint verified later by setup / Plan 3 recall smoke",
+        )
     except (urllib.error.URLError, OSError) as exc:
         return CheckResult(
             "memory-cloud",

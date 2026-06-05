@@ -161,3 +161,14 @@ def test_memory_cloud_ok_with_non_json_body(monkeypatch):
     monkeypatch.setattr(checks.urllib.request, "urlopen", lambda *a, **k: _PlainResp())
     r = checks.check_memory_cloud("https://memory.kagura-ai.com")
     assert r.status is Status.OK
+
+
+def test_memory_cloud_warn_on_http_error(monkeypatch):
+    def _boom(*a, **k):
+        raise urllib.error.HTTPError(
+            "https://memory.kagura-ai.com/health", 403, "Forbidden", {}, None
+        )
+    monkeypatch.setattr(checks.urllib.request, "urlopen", _boom)
+    r = checks.check_memory_cloud("https://memory.kagura-ai.com")
+    assert r.status is Status.WARN
+    assert "403" in r.detail
