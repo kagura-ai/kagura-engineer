@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import typer
+from pydantic import ValidationError
 
 from .config import load_config
 from .doctor.registry import overall_status, run_all
@@ -16,8 +17,12 @@ _CONFIG_OPT = typer.Option("repo.yaml", "--config", "-c", help="path to repo.yam
 def doctor(
     config: str = _CONFIG_OPT, json_out: bool = typer.Option(False, "--json")
 ) -> None:
-    """依存チェーンを検査する。"""
-    cfg = load_config(config)
+    """Check the dependency chain."""
+    try:
+        cfg = load_config(config)
+    except (FileNotFoundError, ValidationError) as exc:
+        typer.echo(f"doctor: invalid config '{config}': {exc}", err=True)
+        raise typer.Exit(code=2)
     results = run_all(cfg)
     if json_out:
         typer.echo(to_json(results))
@@ -29,14 +34,14 @@ def doctor(
 
 @app.command()
 def setup(config: str = _CONFIG_OPT) -> None:
-    """依存を解消する(Plan 2)。"""
+    """Resolve dependencies (Plan 2)."""
     typer.echo("setup: not implemented yet (Plan 2)")
     raise typer.Exit(code=2)
 
 
 @app.command()
 def run(config: str = _CONFIG_OPT) -> None:
-    """idea-mode パイプラインを回す(Plan 3+)。"""
+    """Run the idea-mode pipeline (Plan 3+)."""
     typer.echo("run: not implemented yet (Plan 3)")
     raise typer.Exit(code=2)
 

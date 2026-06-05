@@ -145,3 +145,19 @@ def test_memory_cloud_fail_when_unreachable(monkeypatch):
     monkeypatch.setattr(checks.urllib.request, "urlopen", _boom)
     r = checks.check_memory_cloud("https://memory.kagura-ai.com")
     assert r.status is Status.FAIL
+
+
+def test_memory_cloud_ok_with_non_json_body(monkeypatch):
+    class _PlainResp:
+        def read(self):
+            return b"OK"  # not JSON
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(checks.urllib.request, "urlopen", lambda *a, **k: _PlainResp())
+    r = checks.check_memory_cloud("https://memory.kagura-ai.com")
+    assert r.status is Status.OK

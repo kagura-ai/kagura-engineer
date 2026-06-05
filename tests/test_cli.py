@@ -56,3 +56,18 @@ def test_run_not_implemented(tmp_path):
     result = runner.invoke(app, ["run", "--config", str(_write_cfg(tmp_path))])
     assert result.exit_code != 0
     assert "not implemented" in result.stdout.lower()
+
+
+def test_doctor_missing_config_clean_error(tmp_path):
+    missing = tmp_path / "nope.yaml"
+    result = runner.invoke(app, ["doctor", "--config", str(missing)])
+    assert result.exit_code == 2
+    assert "config" in result.output.lower()
+
+
+def test_doctor_invalid_config_clean_error(tmp_path):
+    bad = tmp_path / "repo.yaml"
+    bad.write_text("profile: coding\n")  # missing required fields
+    result = runner.invoke(app, ["doctor", "--config", str(bad)])
+    assert result.exit_code == 2
+    assert "config" in result.output.lower()

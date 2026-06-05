@@ -53,3 +53,7 @@ def test_overall_status_is_worst():
 def test_overall_status_warn_when_no_fail():
     results = [CheckResult("a", Status.OK, ""), CheckResult("b", Status.WARN, "")]
     assert registry.overall_status(results) is Status.WARN
+
+
+def test_overall_status_empty_is_ok():
+    assert registry.overall_status([]) is Status.OK

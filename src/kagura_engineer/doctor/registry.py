@@ -19,4 +19,6 @@ def run_all(cfg: Config) -> list[CheckResult]:
 
 
 def overall_status(results: list[CheckResult]) -> Status:
+    if not results:
+        return Status.OK
     return max(results, key=lambda r: _WORST[r.status]).status

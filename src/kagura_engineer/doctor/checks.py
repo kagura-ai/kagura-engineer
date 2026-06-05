@@ -82,6 +82,12 @@ def _http_json(url: str) -> dict:
         return json.loads(resp.read())
 
 
+def _http_reach(url: str) -> None:
+    """Open url to confirm reachability; raises on connection/HTTP error. Body ignored."""
+    with urllib.request.urlopen(url, timeout=_TIMEOUT) as resp:  # noqa: S310 (trusted config URL)
+        resp.read()  # body discarded; open succeeding is sufficient proof of reachability
+
+
 def check_ollama(base_url: str, required: list[str]) -> CheckResult:
     try:
         data = _http_json(f"{base_url.rstrip('/')}/api/tags")
@@ -95,7 +101,7 @@ def check_ollama(base_url: str, required: list[str]) -> CheckResult:
         return CheckResult(
             "ollama",
             Status.WARN,
-            f"missing models: {missing}",
+            f"missing models: {', '.join(missing)}",
             f"ollama pull {' && ollama pull '.join(missing)}",
         )
     return CheckResult("ollama", Status.OK, f"{len(have)} models available")
@@ -114,8 +120,8 @@ def check_haiku() -> CheckResult:
 
 def check_memory_cloud(base_url: str) -> CheckResult:
     try:
-        _http_json(f"{base_url.rstrip('/')}/health")
-    except (urllib.error.URLError, OSError, ValueError) as exc:
+        _http_reach(f"{base_url.rstrip('/')}/health")
+    except (urllib.error.URLError, OSError) as exc:
         return CheckResult(
             "memory-cloud",
             Status.FAIL,
