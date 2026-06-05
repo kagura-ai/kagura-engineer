@@ -1,4 +1,6 @@
+import json as _json
 import subprocess
+import urllib.error
 
 import pytest
 
@@ -70,3 +72,76 @@ def test_gh_fail_when_not_authed(monkeypatch):
     r = checks.check_gh()
     assert r.status is Status.FAIL
     assert "gh auth login" in r.fix_hint
+
+
+class _FakeResp:
+    def __init__(self, payload):
+        self._p = _json.dumps(payload).encode()
+
+    def read(self):
+        return self._p
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def test_ollama_ok_with_required_models(monkeypatch):
+    payload = {
+        "models": [{"name": "qwen2.5-coder:7b"}, {"name": "deepseek-coder:6.7b"}]
+    }
+    monkeypatch.setattr(
+        checks.urllib.request, "urlopen", lambda *a, **k: _FakeResp(payload)
+    )
+    r = checks.check_ollama("http://localhost:11434", required=["qwen2.5-coder:7b"])
+    assert r.status is Status.OK
+
+
+def test_ollama_warn_when_model_missing(monkeypatch):
+    payload = {"models": [{"name": "llama3:8b"}]}
+    monkeypatch.setattr(
+        checks.urllib.request, "urlopen", lambda *a, **k: _FakeResp(payload)
+    )
+    r = checks.check_ollama("http://localhost:11434", required=["qwen2.5-coder:7b"])
+    assert r.status is Status.WARN
+    assert "ollama pull" in r.fix_hint
+
+
+def test_ollama_fail_when_daemon_down(monkeypatch):
+    def _boom(*a, **k):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(checks.urllib.request, "urlopen", _boom)
+    r = checks.check_ollama("http://localhost:11434", required=[])
+    assert r.status is Status.FAIL
+    assert "ollama serve" in r.fix_hint
+
+
+def test_haiku_warn_without_auth(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    r = checks.check_haiku()
+    assert r.status is Status.WARN
+
+
+def test_haiku_ok_with_auth(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-xxx")
+    assert checks.check_haiku().status is Status.OK
+
+
+def test_memory_cloud_ok_when_reachable(monkeypatch):
+    monkeypatch.setattr(
+        checks.urllib.request, "urlopen", lambda *a, **k: _FakeResp({"status": "ok"})
+    )
+    r = checks.check_memory_cloud("https://memory.kagura-ai.com")
+    assert r.status is Status.OK
+
+
+def test_memory_cloud_fail_when_unreachable(monkeypatch):
+    def _boom(*a, **k):
+        raise urllib.error.URLError("dns")
+
+    monkeypatch.setattr(checks.urllib.request, "urlopen", _boom)
+    r = checks.check_memory_cloud("https://memory.kagura-ai.com")
+    assert r.status is Status.FAIL

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
+import urllib.error
+import urllib.request
 
 from .result import CheckResult, Status
 
@@ -72,3 +75,51 @@ def check_gh() -> CheckResult:
     if proc.returncode == 0:
         return CheckResult("gh", Status.OK, "authenticated")
     return CheckResult("gh", Status.FAIL, "not authenticated", "gh auth login")
+
+
+def _http_json(url: str) -> dict:
+    with urllib.request.urlopen(url, timeout=_TIMEOUT) as resp:  # noqa: S310 (trusted config URL)
+        return json.loads(resp.read())
+
+
+def check_ollama(base_url: str, required: list[str]) -> CheckResult:
+    try:
+        data = _http_json(f"{base_url.rstrip('/')}/api/tags")
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        return CheckResult(
+            "ollama", Status.FAIL, f"daemon unreachable: {exc}", "ollama serve"
+        )
+    have = {m.get("name") for m in data.get("models", [])}
+    missing = [m for m in required if m not in have]
+    if missing:
+        return CheckResult(
+            "ollama",
+            Status.WARN,
+            f"missing models: {missing}",
+            f"ollama pull {' && ollama pull '.join(missing)}",
+        )
+    return CheckResult("ollama", Status.OK, f"{len(have)} models available")
+
+
+def check_haiku() -> CheckResult:
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return CheckResult("haiku", Status.OK, "auth=api_key")
+    return CheckResult(
+        "haiku",
+        Status.WARN,
+        "no API key; relies on Claude Code subscription path",
+        "set ANTHROPIC_API_KEY or confirm subscription covers haiku",
+    )
+
+
+def check_memory_cloud(base_url: str) -> CheckResult:
+    try:
+        _http_json(f"{base_url.rstrip('/')}/health")
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        return CheckResult(
+            "memory-cloud",
+            Status.FAIL,
+            f"unreachable: {exc}",
+            "check config.memory_cloud_url / network",
+        )
+    return CheckResult("memory-cloud", Status.OK, f"reachable at {base_url}")
