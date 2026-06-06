@@ -1,18 +1,8 @@
-from kagura_engineer.config import Config
 from kagura_engineer.doctor import registry
 from kagura_engineer.doctor.result import CheckResult, Status
 
 
-def _cfg():
-    return Config(
-        profile="coding",
-        memory_cloud_url="https://memory.kagura-ai.com",
-        context_id="550e8400-e29b-41d4-a716-446655440000",
-        review={"models": ["qwen2.5-coder:7b"]},
-    )
-
-
-def test_run_all_invokes_every_check(monkeypatch):
+def test_run_all_invokes_every_check(monkeypatch, valid_config):
     calls = []
 
     def _stub(name):
@@ -29,7 +19,7 @@ def test_run_all_invokes_every_check(monkeypatch):
     monkeypatch.setattr(registry.checks, "check_haiku", _stub("haiku"))
     monkeypatch.setattr(registry.checks, "check_memory_cloud", _stub("memory-cloud"))
 
-    results = registry.run_all(_cfg())
+    results = registry.run_all(valid_config)
     assert {r.name for r in results} == {
         "git",
         "claude-code",
@@ -59,7 +49,7 @@ def test_overall_status_empty_is_ok():
     assert registry.overall_status([]) is Status.OK
 
 
-def test_run_all_isolates_check_exceptions(monkeypatch):
+def test_run_all_isolates_check_exceptions(monkeypatch, valid_config):
     # A buggy check must not abort the rest of the doctor run.
     def _boom(*a, **k):
         raise KeyError("malformed response")
@@ -91,7 +81,7 @@ def test_run_all_isolates_check_exceptions(monkeypatch):
         lambda *a, **k: CheckResult("memory-cloud", Status.OK, "ok"),
     )
 
-    results = registry.run_all(_cfg())
+    results = registry.run_all(valid_config)
     by_name = {r.name: r for r in results}
     # The failing check surfaces as a FAIL row, not a propagated exception.
     assert by_name["git"].status is Status.FAIL

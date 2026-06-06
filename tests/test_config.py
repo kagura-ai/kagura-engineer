@@ -1,29 +1,32 @@
 import pytest
 
 from kagura_engineer.config import Config, load_config
+from kagura_engineer.config import ConfigError
+
+from tests._constants import (
+    VALID_CONTEXT_UUID,
+    VALID_MEMORY_URL,
+    VALID_PROFILE,
+    VALID_WORKSPACE,
+)
 
 
-def test_load_minimal_yaml(tmp_path):
-    p = tmp_path / "repo.yaml"
-    p.write_text(
-        "profile: coding\n"
-        "memory_cloud_url: https://memory.kagura-ai.com\n"
-        "context_id: 550e8400-e29b-41d4-a716-446655440000\n"
-    )
-    cfg = load_config(p)
-    assert cfg.profile == "coding"
+def test_load_minimal_yaml(write_cfg):
+    cfg = load_config(write_cfg)
+    assert cfg.profile == VALID_PROFILE
+    assert cfg.memory_cloud_url == VALID_MEMORY_URL
+    assert cfg.workspace_id == VALID_WORKSPACE
+    assert cfg.context_id == VALID_CONTEXT_UUID
     assert cfg.review.models == []
     assert cfg.review.max_loops == 3
     assert cfg.ollama_url == "http://localhost:11434"
 
 
-def test_review_models_override(tmp_path):
+def test_review_models_override(tmp_path, valid_repo_yaml_text):
     p = tmp_path / "repo.yaml"
     p.write_text(
-        "profile: coding\n"
-        "memory_cloud_url: https://memory.kagura-ai.com\n"
-        "context_id: 550e8400-e29b-41d4-a716-446655440000\n"
-        "review:\n"
+        valid_repo_yaml_text
+        + "review:\n"
         "  models: [qwen2.5-coder:7b, haiku]\n"
         "  max_loops: 5\n"
     )
@@ -32,44 +35,44 @@ def test_review_models_override(tmp_path):
     assert cfg.review.max_loops == 5
 
 
-def test_missing_required_field_raises(tmp_path):
-    from kagura_engineer.config import ConfigError
-
+def test_workspace_id_is_required(tmp_path, valid_repo_yaml_text):
+    # workspace_id is the only required field not present in the canonical
+    # body — strip it out and confirm the loader rejects the result.
+    body = "\n".join(
+        line for line in valid_repo_yaml_text.splitlines() if "workspace_id" not in line
+    )
     p = tmp_path / "repo.yaml"
-    p.write_text("profile: coding\n")
+    p.write_text(body)
+    with pytest.raises(ConfigError):
+        load_config(p)
+
+
+def test_context_id_is_required(tmp_path, valid_repo_yaml_text):
+    body = "\n".join(
+        line for line in valid_repo_yaml_text.splitlines() if "context_id" not in line
+    )
+    p = tmp_path / "repo.yaml"
+    p.write_text(body)
     with pytest.raises(ConfigError):
         load_config(p)
 
 
 def test_missing_file_raises(tmp_path):
-    from kagura_engineer.config import ConfigError
-
     with pytest.raises(ConfigError):
         load_config(tmp_path / "nope.yaml")
 
 
 def test_malformed_yaml_raises_config_error(tmp_path):
-    from kagura_engineer.config import ConfigError
-
     p = tmp_path / "repo.yaml"
-    p.write_text(
-        "profile: coding\n\tbad: tab\n"
-    )  # tab indentation → YAML scanner error
+    p.write_text("profile: coding\n\tbad: tab\n")  # tab → YAML scanner error
     with pytest.raises(ConfigError):
         load_config(p)
 
 
-def test_missing_file_raises_config_error(tmp_path):
-    from kagura_engineer.config import ConfigError
-
-    with pytest.raises(ConfigError):
-        load_config(tmp_path / "nope.yaml")
-
-
-def test_missing_required_field_raises_config_error(tmp_path):
-    from kagura_engineer.config import ConfigError
-
-    p = tmp_path / "repo.yaml"
-    p.write_text("profile: coding\n")
-    with pytest.raises(ConfigError):
-        load_config(p)
+def test_valid_config_fixture_is_well_formed(valid_config):
+    # The fixture itself is the contract; if a future Config field is added
+    # without updating conftest, this assertion fires before any other test
+    # that depends on valid_config.
+    assert valid_config.profile == VALID_PROFILE
+    assert valid_config.workspace_id == VALID_WORKSPACE
+    assert valid_config.context_id == VALID_CONTEXT_UUID

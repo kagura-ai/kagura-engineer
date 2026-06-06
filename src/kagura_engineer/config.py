@@ -18,6 +18,10 @@ class ReviewConfig(BaseModel):
 class Config(BaseModel):
     profile: str
     memory_cloud_url: str
+    # Memory Cloud filter hierarchy: workspace_id -> context_id -> memory.
+    # workspace_id scopes all memory writes/recalls for this project; the
+    # API key (resolved at the client layer) is also workspace-scoped.
+    workspace_id: str
     context_id: str
     ollama_url: str = "http://localhost:11434"
     review: ReviewConfig = Field(default_factory=ReviewConfig)
