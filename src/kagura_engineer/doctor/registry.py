@@ -1,21 +1,43 @@
 from __future__ import annotations
 
+import logging
 from ..config import Config
 from . import checks
 from .result import CheckResult, Status
 
+_log = logging.getLogger(__name__)
+
 _WORST = {Status.OK: 0, Status.WARN: 1, Status.FAIL: 2}
+
+# Each check is a no-arg thunk so the orchestrator can wrap it in a generic
+# try/except. A buggy or partial check must not abort the entire doctor run —
+# surface the failure as a FAIL CheckResult so the user sees the full picture.
+_CHECKS: list[tuple[str, callable]] = [
+    ("git", lambda c: checks.check_git()),
+    ("claude-code", lambda c: checks.check_claude_code()),
+    ("gh", lambda c: checks.check_gh()),
+    ("ollama", lambda c: checks.check_ollama(c.ollama_url, required=c.review.models)),
+    ("haiku", lambda c: checks.check_haiku()),
+    ("memory-cloud", lambda c: checks.check_memory_cloud(c.memory_cloud_url)),
+]
 
 
 def run_all(cfg: Config) -> list[CheckResult]:
-    return [
-        checks.check_git(),
-        checks.check_claude_code(),
-        checks.check_gh(),
-        checks.check_ollama(cfg.ollama_url, required=cfg.review.models),
-        checks.check_haiku(),
-        checks.check_memory_cloud(cfg.memory_cloud_url),
-    ]
+    results: list[CheckResult] = []
+    for name, fn in _CHECKS:
+        try:
+            results.append(fn(cfg))
+        except Exception as exc:  # noqa: BLE001 — see docstring above
+            _log.exception("doctor check %r raised", name)
+            results.append(
+                CheckResult(
+                    name,
+                    Status.FAIL,
+                    f"check raised {type(exc).__name__}: {exc}",
+                    "this is a doctor bug; please report it",
+                )
+            )
+    return results
 
 
 def overall_status(results: list[CheckResult]) -> Status:

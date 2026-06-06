@@ -24,7 +24,7 @@ def check_git() -> CheckResult:
             "git",
             Status.FAIL,
             "git not found on PATH",
-            "kagura-engineer setup --fix git",
+            "install git via your package manager (brew/apt/dnf/pacman) and re-run doctor",
         )
     try:
         proc = _run(["git", "rev-parse", "--is-inside-work-tree"])
@@ -46,7 +46,7 @@ def check_claude_code() -> CheckResult:
             "claude-code",
             Status.FAIL,
             "claude not found on PATH",
-            "kagura-engineer setup --fix claude-code",
+            "install Claude Code (https://claude.ai/download) and re-run doctor",
         )
     try:
         proc = _run(["claude", "--version"])
@@ -83,7 +83,7 @@ def check_claude_code() -> CheckResult:
 def check_gh() -> CheckResult:
     if shutil.which("gh") is None:
         return CheckResult(
-            "gh", Status.FAIL, "gh not found on PATH", "kagura-engineer setup --fix gh"
+            "gh", Status.FAIL, "gh not found on PATH", "install gh (https://cli.github.com/) and re-run doctor"
         )
     try:
         proc = _run(["gh", "auth", "status"])
@@ -108,8 +108,11 @@ def _http_reach(url: str) -> None:
 def _model_present(req: str, have: set[str]) -> bool:
     if req in have:
         return True
-    # untagged config name matches any tag of the same base model
-    return ":" not in req and any(h.split(":", 1)[0] == req for h in have)
+    # Symmetric base-name match: a tagged config (`foo:7b`) matches an
+    # untagged daemon entry (`foo`) and vice versa. Both sides are normalized
+    # to the part before the first ':' before comparing.
+    req_base = req.split(":", 1)[0]
+    return any(h.split(":", 1)[0] == req_base for h in have)
 
 
 def check_ollama(base_url: str, required: list[str]) -> CheckResult:
@@ -126,7 +129,12 @@ def check_ollama(base_url: str, required: list[str]) -> CheckResult:
             "unexpected /api/tags response shape",
             "verify the ollama_url points at an Ollama daemon",
         )
-    have = {m.get("name") for m in data.get("models", []) if isinstance(m, dict)}
+    models_raw = data.get("models")
+    have = {
+        m.get("name")
+        for m in (models_raw or [])
+        if isinstance(m, dict)
+    }
     missing = [m for m in required if not _model_present(m, have)]
     if missing:
         return CheckResult(
@@ -181,6 +189,15 @@ def check_haiku() -> CheckResult:
 
 
 def check_memory_cloud(base_url: str) -> CheckResult:
+    # Extract host-only form so that any userinfo (basic auth) embedded in
+    # `memory_cloud_url` is NOT echoed into the doctor detail string —
+    # `doctor --json` is a common artefact in CI logs and chat pastes.
+    # `urlparse(...).hostname` drops username:password@ automatically.
+    from urllib.parse import urlparse
+    try:
+        host_only = urlparse(base_url).hostname or base_url
+    except (ValueError, TypeError):
+        host_only = base_url
     try:
         _http_reach(f"{base_url.rstrip('/')}/health")
     except urllib.error.HTTPError as exc:
@@ -199,4 +216,4 @@ def check_memory_cloud(base_url: str) -> CheckResult:
             f"unreachable: {exc}",
             "check config.memory_cloud_url / network",
         )
-    return CheckResult("memory-cloud", Status.OK, f"reachable at {base_url}")
+    return CheckResult("memory-cloud", Status.OK, f"reachable at {host_only}")

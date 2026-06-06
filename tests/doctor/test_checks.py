@@ -27,7 +27,7 @@ def test_git_fail_when_missing(monkeypatch):
     monkeypatch.setattr(checks.shutil, "which", lambda _: None)
     r = checks.check_git()
     assert r.status is Status.FAIL
-    assert "setup" in r.fix_hint
+    assert "re-run doctor" in r.fix_hint
 
 
 def test_claude_ok_with_api_key(monkeypatch):
@@ -156,6 +156,42 @@ def test_ollama_untagged_config_matches_tagged_daemon_model(monkeypatch):
     )
     r = checks.check_ollama("http://localhost:11434", required=["qwen2.5-coder"])
     assert r.status is Status.OK
+
+
+def test_ollama_tagged_config_matches_untagged_daemon_model(monkeypatch):
+    # Daemon returned the model under its untagged default name (e.g. after
+    # `ollama cp qwen2.5-coder:7b qwen2.5-coder`). The config still names
+    # the tagged form. Matching must succeed.
+    payload = {"models": [{"name": "qwen2.5-coder"}]}
+    monkeypatch.setattr(
+        checks.urllib.request, "urlopen", lambda *a, **k: _FakeResp(payload)
+    )
+    r = checks.check_ollama("http://localhost:11434", required=["qwen2.5-coder:7b"])
+    assert r.status is Status.OK
+
+
+def test_ollama_warn_when_models_field_is_null(monkeypatch):
+    # Daemon (or a proxy) returns {"models": null}. Must not raise TypeError.
+    payload = {"models": None}
+    monkeypatch.setattr(
+        checks.urllib.request, "urlopen", lambda *a, **k: _FakeResp(payload)
+    )
+    r = checks.check_ollama("http://localhost:11434", required=["qwen2.5-coder:7b"])
+    # No required models present and an empty `have` set → WARN.
+    assert r.status is Status.WARN
+    assert "missing" in r.detail.lower()
+
+
+def test_memory_cloud_ok_strips_credentials(monkeypatch):
+    # If the configured URL embeds basic auth, the OK detail must not echo it.
+    monkeypatch.setattr(
+        checks.urllib.request, "urlopen", lambda *a, **k: _FakeResp({"status": "ok"})
+    )
+    r = checks.check_memory_cloud("https://svc:s3cret@memory.local")
+    assert r.status is Status.OK
+    assert "s3cret" not in r.detail
+    assert "svc@" not in r.detail
+    assert "memory.local" in r.detail
 
 
 def test_ollama_fail_when_daemon_down(monkeypatch):

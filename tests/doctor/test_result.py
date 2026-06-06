@@ -13,10 +13,10 @@ def test_fail_result_is_blocking_and_carries_hint():
         name="claude-code",
         status=Status.FAIL,
         detail="claude not found on PATH",
-        fix_hint="kagura-engineer setup --fix claude-code",
+        fix_hint="install Claude Code (https://claude.ai/download) and re-run doctor",
     )
     assert r.is_blocking is True
-    assert "setup --fix" in r.fix_hint
+    assert "re-run doctor" in r.fix_hint
 
 
 def test_warn_result_is_not_blocking():
