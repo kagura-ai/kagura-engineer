@@ -71,3 +71,11 @@ def test_doctor_invalid_config_clean_error(tmp_path):
     result = runner.invoke(app, ["doctor", "--config", str(bad)])
     assert result.exit_code == 2
     assert "config" in result.output.lower()
+
+
+def test_doctor_malformed_yaml_clean_error(tmp_path):
+    bad = tmp_path / "repo.yaml"
+    bad.write_text("profile: coding\n\tbad: tab\n")
+    result = runner.invoke(app, ["doctor", "--config", str(bad)])
+    assert result.exit_code == 2
+    assert "config" in result.output.lower() or "yaml" in result.output.lower()

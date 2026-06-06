@@ -52,6 +52,13 @@ def check_claude_code() -> CheckResult:
         return CheckResult(
             "claude-code", Status.FAIL, f"claude invocation failed: {exc}", None
         )
+    if proc.returncode != 0:
+        return CheckResult(
+            "claude-code",
+            Status.FAIL,
+            f"`claude --version` exited {proc.returncode}",
+            "reinstall/repair Claude Code",
+        )
     version = proc.stdout.strip() or "unknown"
     if os.environ.get("ANTHROPIC_API_KEY"):
         return CheckResult("claude-code", Status.OK, f"v{version}, auth=api_key")
@@ -88,6 +95,13 @@ def _http_reach(url: str) -> None:
         resp.read()  # body discarded; open succeeding is sufficient proof of reachability
 
 
+def _model_present(req: str, have: set[str]) -> bool:
+    if req in have:
+        return True
+    # untagged config name matches any tag of the same base model
+    return ":" not in req and any(h.split(":", 1)[0] == req for h in have)
+
+
 def check_ollama(base_url: str, required: list[str]) -> CheckResult:
     try:
         data = _http_json(f"{base_url.rstrip('/')}/api/tags")
@@ -95,8 +109,15 @@ def check_ollama(base_url: str, required: list[str]) -> CheckResult:
         return CheckResult(
             "ollama", Status.FAIL, f"daemon unreachable: {exc}", "ollama serve"
         )
+    if not isinstance(data, dict):
+        return CheckResult(
+            "ollama",
+            Status.WARN,
+            "unexpected /api/tags response shape",
+            "verify the ollama_url points at an Ollama daemon",
+        )
     have = {m.get("name") for m in data.get("models", [])}
-    missing = [m for m in required if m not in have]
+    missing = [m for m in required if not _model_present(m, have)]
     if missing:
         return CheckResult(
             "ollama",

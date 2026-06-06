@@ -23,3 +23,9 @@ def test_print_table_smoke(capsys):
     render.print_table([CheckResult("git", Status.OK, "ok")])
     captured = capsys.readouterr()
     assert "git" in captured.out
+
+
+def test_to_json_keeps_non_ascii():
+    r = [CheckResult("memory-cloud", Status.OK, "到達 https://例え.jp")]
+    out = render.to_json(r)
+    assert "到達" in out

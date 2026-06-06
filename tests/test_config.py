@@ -1,5 +1,4 @@
 import pytest
-from pydantic import ValidationError
 
 from kagura_engineer.config import Config, load_config
 
@@ -34,12 +33,43 @@ def test_review_models_override(tmp_path):
 
 
 def test_missing_required_field_raises(tmp_path):
+    from kagura_engineer.config import ConfigError
+
     p = tmp_path / "repo.yaml"
     p.write_text("profile: coding\n")
-    with pytest.raises(ValidationError):
+    with pytest.raises(ConfigError):
         load_config(p)
 
 
 def test_missing_file_raises(tmp_path):
-    with pytest.raises(FileNotFoundError):
+    from kagura_engineer.config import ConfigError
+
+    with pytest.raises(ConfigError):
         load_config(tmp_path / "nope.yaml")
+
+
+def test_malformed_yaml_raises_config_error(tmp_path):
+    from kagura_engineer.config import ConfigError
+
+    p = tmp_path / "repo.yaml"
+    p.write_text(
+        "profile: coding\n\tbad: tab\n"
+    )  # tab indentation → YAML scanner error
+    with pytest.raises(ConfigError):
+        load_config(p)
+
+
+def test_missing_file_raises_config_error(tmp_path):
+    from kagura_engineer.config import ConfigError
+
+    with pytest.raises(ConfigError):
+        load_config(tmp_path / "nope.yaml")
+
+
+def test_missing_required_field_raises_config_error(tmp_path):
+    from kagura_engineer.config import ConfigError
+
+    p = tmp_path / "repo.yaml"
+    p.write_text("profile: coding\n")
+    with pytest.raises(ConfigError):
+        load_config(p)

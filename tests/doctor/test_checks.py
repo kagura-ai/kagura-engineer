@@ -58,6 +58,16 @@ def test_claude_fail_when_missing(monkeypatch):
     assert r.status is Status.FAIL
 
 
+def test_claude_fail_on_nonzero_version(monkeypatch):
+    monkeypatch.setattr(checks.shutil, "which", lambda _: "/usr/bin/claude")
+    monkeypatch.setattr(
+        checks.subprocess, "run", lambda *a, **k: _completed(1, "", "boom")
+    )
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    r = checks.check_claude_code()
+    assert r.status is Status.FAIL
+
+
 def test_gh_ok_when_authed(monkeypatch):
     monkeypatch.setattr(checks.shutil, "which", lambda _: "/usr/bin/gh")
     monkeypatch.setattr(checks.subprocess, "run", lambda *a, **k: _completed(0))
@@ -107,6 +117,22 @@ def test_ollama_warn_when_model_missing(monkeypatch):
     r = checks.check_ollama("http://localhost:11434", required=["qwen2.5-coder:7b"])
     assert r.status is Status.WARN
     assert "ollama pull" in r.fix_hint
+
+
+def test_ollama_warn_on_non_dict_response(monkeypatch):
+    monkeypatch.setattr(checks.urllib.request, "urlopen", lambda *a, **k: _FakeResp([]))
+    r = checks.check_ollama("http://localhost:11434", required=["qwen2.5-coder:7b"])
+    assert r.status is Status.WARN
+    assert "unexpected" in r.detail.lower()
+
+
+def test_ollama_untagged_config_matches_tagged_daemon_model(monkeypatch):
+    payload = {"models": [{"name": "qwen2.5-coder:7b"}]}
+    monkeypatch.setattr(
+        checks.urllib.request, "urlopen", lambda *a, **k: _FakeResp(payload)
+    )
+    r = checks.check_ollama("http://localhost:11434", required=["qwen2.5-coder"])
+    assert r.status is Status.OK
 
 
 def test_ollama_fail_when_daemon_down(monkeypatch):
@@ -168,6 +194,7 @@ def test_memory_cloud_warn_on_http_error(monkeypatch):
         raise urllib.error.HTTPError(
             "https://memory.kagura-ai.com/health", 403, "Forbidden", {}, None
         )
+
     monkeypatch.setattr(checks.urllib.request, "urlopen", _boom)
     r = checks.check_memory_cloud("https://memory.kagura-ai.com")
     assert r.status is Status.WARN

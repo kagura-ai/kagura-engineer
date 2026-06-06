@@ -24,7 +24,8 @@ def to_json(results: list[CheckResult]) -> str:
                 }
                 for r in results
             ],
-        }
+        },
+        ensure_ascii=False,
     )
 
 

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import typer
-from pydantic import ValidationError
 
-from .config import load_config
+from .config import ConfigError, load_config
 from .doctor.registry import overall_status, run_all
 from .doctor.render import print_table, to_json
 from .doctor.result import Status
@@ -20,7 +19,7 @@ def doctor(
     """Check the dependency chain."""
     try:
         cfg = load_config(config)
-    except (FileNotFoundError, ValidationError) as exc:
+    except ConfigError as exc:
         typer.echo(f"doctor: invalid config '{config}': {exc}", err=True)
         raise typer.Exit(code=2)
     results = run_all(cfg)
