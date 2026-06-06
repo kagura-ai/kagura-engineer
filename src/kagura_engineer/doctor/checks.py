@@ -116,7 +116,7 @@ def check_ollama(base_url: str, required: list[str]) -> CheckResult:
             "unexpected /api/tags response shape",
             "verify the ollama_url points at an Ollama daemon",
         )
-    have = {m.get("name") for m in data.get("models", [])}
+    have = {m.get("name") for m in data.get("models", []) if isinstance(m, dict)}
     missing = [m for m in required if not _model_present(m, have)]
     if missing:
         return CheckResult(

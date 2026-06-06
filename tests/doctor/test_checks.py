@@ -126,6 +126,18 @@ def test_ollama_warn_on_non_dict_response(monkeypatch):
     assert "unexpected" in r.detail.lower()
 
 
+def test_ollama_ignores_non_dict_model_entries(monkeypatch):
+    # models list contains a stray non-dict element alongside a valid one
+    payload = {"models": ["corrupt-string-entry", {"name": "qwen2.5-coder:7b"}]}
+    monkeypatch.setattr(
+        checks.urllib.request, "urlopen", lambda *a, **k: _FakeResp(payload)
+    )
+    r = checks.check_ollama("http://localhost:11434", required=["qwen2.5-coder:7b"])
+    assert (
+        r.status is Status.OK
+    )  # the valid model is still found; the stray entry must not crash
+
+
 def test_ollama_untagged_config_matches_tagged_daemon_model(monkeypatch):
     payload = {"models": [{"name": "qwen2.5-coder:7b"}]}
     monkeypatch.setattr(
