@@ -60,7 +60,15 @@ def check_claude_code() -> CheckResult:
             "reinstall/repair Claude Code",
         )
     version = proc.stdout.strip() or "unknown"
-    if os.environ.get("ANTHROPIC_API_KEY"):
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if key is not None and key == "":
+        return CheckResult(
+            "claude-code",
+            Status.FAIL,
+            f"v{version}, ANTHROPIC_API_KEY is set to empty string",
+            "unset or set a real value (e.g. `export ANTHROPIC_API_KEY=sk-ant-...`)",
+        )
+    if key:
         return CheckResult("claude-code", Status.OK, f"v{version}, auth=api_key")
     return CheckResult(
         "claude-code",
@@ -129,12 +137,24 @@ def check_ollama(base_url: str, required: list[str]) -> CheckResult:
 
 
 def check_haiku() -> CheckResult:
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return CheckResult("haiku", Status.OK, "auth=api_key")
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if key is not None and key == "":
+        return CheckResult(
+            "haiku",
+            Status.FAIL,
+            "ANTHROPIC_API_KEY is set to empty string",
+            "unset or set a real value",
+        )
+    if key:
+        return CheckResult(
+            "haiku",
+            Status.OK,
+            "env ANTHROPIC_API_KEY is set; no API probe in P1",
+        )
     return CheckResult(
         "haiku",
         Status.WARN,
-        "no API key; relies on Claude Code subscription path",
+        "no API key; relies on Claude Code subscription path (P1: env presence only, no live probe)",
         "set ANTHROPIC_API_KEY or confirm subscription covers haiku",
     )
 

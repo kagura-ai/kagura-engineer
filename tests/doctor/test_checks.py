@@ -58,6 +58,17 @@ def test_claude_fail_when_missing(monkeypatch):
     assert r.status is Status.FAIL
 
 
+def test_claude_fail_when_api_key_is_empty(monkeypatch):
+    monkeypatch.setattr(checks.shutil, "which", lambda _: "/usr/bin/claude")
+    monkeypatch.setattr(
+        checks.subprocess, "run", lambda *a, **k: _completed(0, "1.2.3\n")
+    )
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    r = checks.check_claude_code()
+    assert r.status is Status.FAIL
+    assert "empty" in r.detail.lower()
+
+
 def test_claude_fail_on_nonzero_version(monkeypatch):
     monkeypatch.setattr(checks.shutil, "which", lambda _: "/usr/bin/claude")
     monkeypatch.setattr(
@@ -166,6 +177,13 @@ def test_haiku_warn_without_auth(monkeypatch):
 def test_haiku_ok_with_auth(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-xxx")
     assert checks.check_haiku().status is Status.OK
+
+
+def test_haiku_fail_when_api_key_is_empty(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    r = checks.check_haiku()
+    assert r.status is Status.FAIL
+    assert "empty" in r.detail.lower()
 
 
 def test_memory_cloud_ok_when_reachable(monkeypatch):

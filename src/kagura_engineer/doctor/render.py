@@ -6,9 +6,13 @@ from rich.console import Console
 from rich.table import Table
 
 from .registry import overall_status
-from .result import CheckResult
+from .result import CheckResult, Status
 
-_ICON = {"ok": "✅", "warn": "⚠️", "fail": "❌"}
+_ICON: dict[Status, str] = {
+    Status.OK: "✅",
+    Status.WARN: "⚠️",
+    Status.FAIL: "❌",
+}
 
 
 def to_json(results: list[CheckResult]) -> str:
@@ -36,5 +40,5 @@ def print_table(results: list[CheckResult]) -> None:
     table.add_column("detail")
     table.add_column("fix")
     for r in results:
-        table.add_row(_ICON[r.status.value], r.name, r.detail, r.fix_hint or "")
+        table.add_row(_ICON[r.status], r.name, r.detail, r.fix_hint or "")
     Console().print(table)
