@@ -168,8 +168,11 @@ def test_ollama_fail_when_daemon_down(monkeypatch):
     assert "ollama serve" in r.fix_hint
 
 
-def test_haiku_warn_without_auth(monkeypatch):
+def test_haiku_warn_without_auth(monkeypatch, tmp_path):
+    # No env, no credential cache anywhere → WARN.
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    fake_home = tmp_path  # empty dir, no .claude/ and no .claude.json
+    monkeypatch.setattr(checks.Path, "home", classmethod(lambda cls: fake_home))
     r = checks.check_haiku()
     assert r.status is Status.WARN
 
@@ -184,6 +187,30 @@ def test_haiku_fail_when_api_key_is_empty(monkeypatch):
     r = checks.check_haiku()
     assert r.status is Status.FAIL
     assert "empty" in r.detail.lower()
+
+
+def test_haiku_ok_with_subscription_credential_cache(monkeypatch, tmp_path):
+    # No ANTHROPIC_API_KEY, but ~/.claude/.credentials.json exists → OK (subscription).
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    fake_home = tmp_path
+    cred = fake_home / ".claude" / ".credentials.json"
+    cred.parent.mkdir(parents=True)
+    cred.write_text("{}")  # contents don't matter for P1
+    monkeypatch.setattr(checks.Path, "home", classmethod(lambda cls: fake_home))
+    r = checks.check_haiku()
+    assert r.status is Status.OK
+    assert "subscription" in r.detail.lower()
+
+
+def test_haiku_ok_with_legacy_claude_json(monkeypatch, tmp_path):
+    # Legacy fallback: ~/.claude.json exists, ~/.claude/.credentials.json does not.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    fake_home = tmp_path
+    (fake_home / ".claude.json").write_text("{}")
+    monkeypatch.setattr(checks.Path, "home", classmethod(lambda cls: fake_home))
+    r = checks.check_haiku()
+    assert r.status is Status.OK
+    assert "subscription" in r.detail.lower()
 
 
 def test_memory_cloud_ok_when_reachable(monkeypatch):

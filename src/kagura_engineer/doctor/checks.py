@@ -4,8 +4,10 @@ import json
 import os
 import shutil
 import subprocess
+import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 from .result import CheckResult, Status
 
@@ -151,11 +153,30 @@ def check_haiku() -> CheckResult:
             Status.OK,
             "env ANTHROPIC_API_KEY is set; no API probe in P1",
         )
+    # Subscription path: check the Claude Code credential cache.
+    # `~/.claude/.credentials.json` (preferred, modern) and `~/.claude.json` (legacy)
+    # are written by `claude` on first interactive login. We treat presence as
+    # "subscription login has happened at some point"; mtime is informational.
+    candidates = [
+        Path.home() / ".claude" / ".credentials.json",
+        Path.home() / ".claude.json",
+    ]
+    for path in candidates:
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        age_days = (time.time() - stat.st_mtime) / 86400
+        return CheckResult(
+            "haiku",
+            Status.OK,
+            f"subscription login detected (credential cache: {path}, {age_days:.0f}d old); no live probe in P1",
+        )
     return CheckResult(
         "haiku",
         Status.WARN,
         "no API key; relies on Claude Code subscription path (P1: env presence only, no live probe)",
-        "set ANTHROPIC_API_KEY or confirm subscription covers haiku",
+        "set ANTHROPIC_API_KEY or run `claude` once interactively to establish a subscription login",
     )
 
 
