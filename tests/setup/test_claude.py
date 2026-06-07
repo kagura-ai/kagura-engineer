@@ -146,10 +146,38 @@ def test_claude_not_present_curl_install_succeeds(monkeypatch, tmp_path):
     # command's "install" verb is satisfied; the auth step is not.
     assert r.status is StepStatus.NEEDS_USER
     assert len(calls) == 1
-    # The install command is run via `sh -c`, so subprocess.run gets
-    # a string. It must start with the curl invocation.
-    assert isinstance(calls[0], str)
-    assert calls[0].startswith("curl ")
+    # The pipeline runs under `bash -c` with pipefail so a failed download
+    # is not masked. subprocess.run gets a list, not a shell string.
+    assert isinstance(calls[0], list)
+    assert calls[0][:2] == ["bash", "-c"]
+    assert "curl -fsSL" in calls[0][2]
+
+
+def test_claude_install_runs_pipeline_with_pipefail(monkeypatch, tmp_path):
+    # `curl ... | bash` must run under bash with `set -o pipefail` so a
+    # failed/404 download (curl exits non-zero) is not masked by bash
+    # reading empty stdin and exiting 0. Without pipefail the pipeline's
+    # exit code is bash's (0) and a broken install is reported as success.
+    monkeypatch.setattr(
+        claude_setup.shutil, "which",
+        lambda n: "/usr/bin/curl" if n == "curl" else None,
+    )
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(auth_module.Path, "home", classmethod(lambda cls: tmp_path))
+    calls = []
+    monkeypatch.setattr(
+        claude_setup.subprocess, "run",
+        lambda cmd, **kw: (calls.append((cmd, kw)), subprocess.CompletedProcess(cmd, 0, "", ""))[-1],
+    )
+    monkeypatch.setattr(claude_setup.time, "monotonic", lambda: 1.0)
+
+    ensure_claude_login(no_input=False, dry_run=False)
+    cmd, kw = calls[0]
+    assert isinstance(cmd, list)
+    assert cmd[:2] == ["bash", "-c"]
+    assert "set -o pipefail" in cmd[2]
+    assert "curl -fsSL" in cmd[2]
+    assert kw.get("shell", False) is False
 
 
 def test_claude_install_fails_returns_fail(monkeypatch, tmp_path):

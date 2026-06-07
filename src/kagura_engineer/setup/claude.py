@@ -65,14 +65,16 @@ def _install_claude() -> StepResult | None:
     #   -s silent (no progress meter, easier to read in CI logs)
     #   -S still show errors
     #   -L follow redirects (the URL has moved at least once)
-    cmd = ["curl", "-fsSL", INSTALL_URL, "|", "bash"]
-    # We cannot run a pipeline directly via subprocess.run with a
-    # list; we instead pass it through `sh -c` so the pipe is honored
-    # on POSIX. On Windows v1 (no auto-install) we never reach here.
+    # The pipeline runs under `bash -c` with `set -o pipefail` so the
+    # pipeline's exit status reflects curl's failure: without pipefail a
+    # 404 (curl non-zero) would be masked by bash reading empty stdin and
+    # exiting 0, and a broken download would look like a successful install.
+    # We pass an argv list (no shell=True) so INSTALL_URL is not re-parsed.
+    # On Windows v1 (no auto-install) we never reach here.
+    script = f"set -o pipefail; curl -fsSL {INSTALL_URL} | bash"
     try:
         proc = subprocess.run(
-            " ".join(cmd),
-            shell=True,
+            ["bash", "-c", script],
             capture_output=True,
             text=True,
             timeout=_INSTALL_TIMEOUT_S,
