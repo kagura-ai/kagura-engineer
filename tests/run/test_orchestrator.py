@@ -157,3 +157,15 @@ def test_phase_timeout_is_fail(monkeypatch):
     report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
     assert report.status is RunStatus.FAIL
     assert "timed out" in report.phases[-1].detail
+
+
+def test_phase_launch_oserror_is_fail(monkeypatch):
+    _patch_boundaries(monkeypatch, phases={})
+
+    def _boom(phase, issue, worktree, grounding, **kw):
+        raise OSError("claude: command not found")
+
+    monkeypatch.setattr("kagura_engineer.run.invoke_phase", _boom)
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.FAIL
+    assert report.phases[-1].name == "start"

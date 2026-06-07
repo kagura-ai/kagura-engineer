@@ -10,7 +10,7 @@
     persist  → remember(savepoint) + set_state(done)   (skipped by --no-remember)
 
 A red/unknown gate verdict halts with BLOCKED and a resume hint; a
-non-zero claude exit is FAIL. External calls (worktree, memory SDK) are
+non-zero claude exit is FAIL. External calls (worktree, memory SDK, claude launch) are
 wrapped in try/except so an infrastructure error returns a FAIL
 RunReport with a clean exit code instead of a traceback — the same
 isolation invariant setup.run_plan and doctor.run_all enforce. Every
@@ -99,7 +99,12 @@ def run_idea(
     # 3-4. act: start, then ship.
     pr_url = None
     for phase in _PHASES:
-        inv = invoke_phase(phase, issue, wt, grounding)
+        try:
+            inv = invoke_phase(phase, issue, wt, grounding)
+        except OSError as exc:
+            _log.exception("run %s phase failed to launch claude", phase)
+            phases.append(PhaseResult(phase, RunStatus.FAIL, f"failed to launch claude: {exc}"))
+            return _finish(worktree=str(wt))
         if inv.returncode != 0:
             if inv.timed_out:
                 tail = "timed out"
