@@ -85,6 +85,9 @@ def run_reviewer(
         base=base, head=head, repo=repo, out=out,
         context_file=context_file, model=model, effort=effort,
     )
+    # Clear any stale report from a prior run so a reviewer that exits 0
+    # without rewriting --out can never be mis-gated on old findings.
+    out.unlink(missing_ok=True)
     try:
         proc = subprocess.run(
             argv, capture_output=True, text=True, timeout=timeout,

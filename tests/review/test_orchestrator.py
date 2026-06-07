@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from kagura_engineer.config import Config
 from kagura_engineer.review import REVIEW_STATUS_EXIT, review_pr
 from kagura_engineer.review.envelope import ReviewEnvelope
@@ -131,3 +129,26 @@ def test_report_path_persists_after_return(monkeypatch, tmp_path):
     assert rep.report_path is not None
     from pathlib import Path as _P
     assert _P(rep.report_path).is_file()
+
+
+def test_timed_out_is_fail(monkeypatch, tmp_path):
+    _patch_reviewer(
+        monkeypatch,
+        ReviewerResult(-1, "", "timed out", ReviewEnvelope(parsed=False), timed_out=True),
+    )
+    rep = review_pr(_cfg(), "HEAD", base="main", repo_root=tmp_path, memory=_FakeMem())
+    assert rep.status is ReviewStatus.FAIL
+    assert "timed out" in rep.detail.lower()
+
+
+def test_incomplete_yellow_stays_ok_with_advisory(monkeypatch, tmp_path):
+    # an incomplete (meta-finding) yellow review is advisory, NOT a hard block
+    env = ReviewEnvelope(
+        parsed=True, verdict="yellow",
+        summary={"total": 1, "blocking": 0, "incomplete": True},
+        findings=[Finding("meta", "INFO", "", None, "review did not finish")],
+    )
+    _patch_reviewer(monkeypatch, ReviewerResult(0, "", "", env))
+    rep = review_pr(_cfg(), "HEAD", base="main", repo_root=tmp_path, memory=_FakeMem())
+    assert rep.status is ReviewStatus.OK
+    assert "incomplete" in rep.detail.lower()
