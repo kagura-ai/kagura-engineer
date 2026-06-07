@@ -105,3 +105,55 @@ def test_no_remember_skips_persist(monkeypatch):
     assert report.status is RunStatus.OK
     assert mem.remembered == []  # recall still happened, persist skipped
     assert "persist" not in [p.name for p in report.phases]
+
+
+def test_worktree_error_is_fail(monkeypatch):
+    from kagura_engineer.run.worktree import WorktreeError
+
+    _patch_boundaries(monkeypatch, phases={})
+
+    def _boom(root, issue, base="HEAD"):
+        raise WorktreeError("git worktree add failed")
+
+    monkeypatch.setattr("kagura_engineer.run.ensure_worktree", _boom)
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.FAIL
+    assert report.phases[-1].name == "worktree"
+
+
+def test_recall_error_is_fail(monkeypatch):
+    _patch_boundaries(monkeypatch, phases={})
+
+    class _BrokenMemory(_FakeMemory):
+        def recall(self, context_id, query, *, k=5):
+            raise RuntimeError("kagura connection refused")
+
+    report = run_idea(_cfg(), 42, memory=_BrokenMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.FAIL
+    assert report.phases[-1].name == "recall"
+
+
+def test_persist_failure_is_non_fatal(monkeypatch):
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+
+    class _BrokenPersist(_FakeMemory):
+        def remember(self, context_id, *, summary, content, type, tags=None):
+            raise RuntimeError("kagura write failed")
+
+    report = run_idea(_cfg(), 42, memory=_BrokenPersist(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK  # PR was created; persist failure is non-fatal
+    assert report.pr_url == "https://x/pull/9"
+    assert report.phases[-1].name == "persist"
+    assert "failed" in report.phases[-1].detail
+
+
+def test_phase_timeout_is_fail(monkeypatch):
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", -1, "", "timed out", None, None, timed_out=True),
+    })
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.FAIL
+    assert "timed out" in report.phases[-1].detail
