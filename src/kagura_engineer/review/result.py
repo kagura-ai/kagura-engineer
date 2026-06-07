@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass, field
+from typing import Any
 
 
 class ReviewStatus(enum.Enum):
@@ -39,7 +40,7 @@ class ReviewReport:
     base: str
     verdict: str | None = None
     status: ReviewStatus = ReviewStatus.OK
-    summary: dict = field(default_factory=dict)
+    summary: dict[str, Any] = field(default_factory=dict)
     findings: list[Finding] = field(default_factory=list)
     detail: str = ""
     resume_hint: str | None = None
