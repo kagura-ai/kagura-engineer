@@ -135,3 +135,48 @@ def test_cloud_feedback_passthrough():
 
     KaguraCloudClient(_Sdk()).feedback("ctx", "m1", weight=2.0)
     assert seen == {"context_id": "ctx", "memory_id": "m1", "weight": 2.0}
+
+
+# --- Plan 5+: recall filters + pin/unpin on the cloud client ----------------
+
+
+def test_cloud_recall_passes_tag_and_importance_filters():
+    from kagura_engineer.run.memory import KaguraCloudClient
+    seen = {}
+
+    class _Sdk:
+        def recall(self, context_id, *, query, k, filters):
+            seen["filters"] = filters
+            return {"results": []}
+
+    KaguraCloudClient(_Sdk()).recall("ctx", "q", tags=["security"], min_importance=0.7)
+    assert seen["filters"]["trust_tier"] == "trusted"
+    assert seen["filters"]["tags"] == ["security"]
+    assert seen["filters"]["importance"] == {"gte": 0.7}
+
+
+def test_cloud_recall_no_filters_is_trust_only():
+    from kagura_engineer.run.memory import KaguraCloudClient
+    seen = {}
+
+    class _Sdk:
+        def recall(self, context_id, *, query, k, filters):
+            seen["filters"] = filters
+            return {"results": []}
+
+    KaguraCloudClient(_Sdk()).recall("ctx", "q")
+    assert seen["filters"] == {"trust_tier": "trusted"}  # no tags/importance keys
+
+
+def test_cloud_pin_unpin_passthrough():
+    from kagura_engineer.run.memory import KaguraCloudClient
+    calls = []
+
+    class _Sdk:
+        def update_memory(self, context_id, *, memory_id, delivery_mode):
+            calls.append((memory_id, delivery_mode))
+
+    c = KaguraCloudClient(_Sdk())
+    c.pin("ctx", "m1")
+    c.unpin("ctx", "m1")
+    assert calls == [("m1", "always"), ("m1", "on_recall")]

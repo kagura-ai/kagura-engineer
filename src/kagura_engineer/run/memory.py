@@ -22,11 +22,15 @@ from ..config import Config
 @runtime_checkable
 class MemoryClient(Protocol):
     def load_pinned(self, context_id: str) -> list[str]: ...
-    def recall(self, context_id: str, query: str, *, k: int = 5) -> list[str]: ...
+    def recall(
+        self, context_id: str, query: str, *, k: int = 5,
+        tags: list[str] | None = None, min_importance: float = 0.0,
+    ) -> list[str]: ...
     # Like recall, but returns (memory_id, summary) pairs so the caller can
     # reinforce the memories it actually used via feedback().
     def recall_detailed(
-        self, context_id: str, query: str, *, k: int = 5
+        self, context_id: str, query: str, *, k: int = 5,
+        tags: list[str] | None = None, min_importance: float = 0.0,
     ) -> list[tuple[str, str]]: ...
     def remember(
         self, context_id: str, *, summary: str, content: str, type: str,
@@ -35,6 +39,9 @@ class MemoryClient(Protocol):
     # Reinforce a memory that proved useful (Hebbian-style). `weight` scales
     # the reinforcement; the implementation decides how it is applied.
     def feedback(self, context_id: str, memory_id: str, *, weight: float = 1.0) -> None: ...
+    # Pin / unpin a memory so load_pinned surfaces it (delivery_mode toggle).
+    def pin(self, context_id: str, memory_id: str) -> None: ...
+    def unpin(self, context_id: str, memory_id: str) -> None: ...
     def get_state(self, context_id: str, key: str) -> dict | None: ...
     def set_state(self, context_id: str, key: str, value: dict) -> None: ...
 
@@ -43,6 +50,17 @@ class MemoryClient(Protocol):
 # reads; the trusted tier excludes external/connector-ingested memories
 # (OWASP LLM01/LLM03), matching the session-start bootstrap policy.
 _TRUST_FILTER = {"trust_tier": "trusted"}
+
+
+def _recall_filters(tags: list[str] | None, min_importance: float) -> dict:
+    """Build the SDK recall filters: always trust-tier filtered, plus optional
+    tag (match-any) and importance floor."""
+    filters: dict = dict(_TRUST_FILTER)
+    if tags:
+        filters["tags"] = list(tags)
+    if min_importance > 0.0:
+        filters["importance"] = {"gte": min_importance}
+    return filters
 
 
 class KaguraCloudClient:
@@ -65,16 +83,26 @@ class KaguraCloudClient:
         resp = self._sdk.load_pinned(context_id)
         return [m["summary"] for m in resp.get("memories", []) if m.get("summary")]
 
-    def recall(self, context_id: str, query: str, *, k: int = 5) -> list[str]:
+    def recall(
+        self, context_id: str, query: str, *, k: int = 5,
+        tags: list[str] | None = None, min_importance: float = 0.0,
+    ) -> list[str]:
         # Grounding-only: summaries are useful even for an id-less row, so this
         # keeps a looser filter than recall_detailed (which needs ids for feedback).
-        resp = self._sdk.recall(context_id, query=query, k=k, filters=_TRUST_FILTER)
+        resp = self._sdk.recall(
+            context_id, query=query, k=k,
+            filters=_recall_filters(tags, min_importance),
+        )
         return [r["summary"] for r in resp.get("results", []) if r.get("summary")]
 
     def recall_detailed(
-        self, context_id: str, query: str, *, k: int = 5
+        self, context_id: str, query: str, *, k: int = 5,
+        tags: list[str] | None = None, min_importance: float = 0.0,
     ) -> list[tuple[str, str]]:
-        resp = self._sdk.recall(context_id, query=query, k=k, filters=_TRUST_FILTER)
+        resp = self._sdk.recall(
+            context_id, query=query, k=k,
+            filters=_recall_filters(tags, min_importance),
+        )
         return [
             (r["memory_id"], r["summary"])
             for r in resp.get("results", [])
@@ -86,6 +114,12 @@ class KaguraCloudClient:
         # by the offline test suite (the SDK isn't a declared dependency); the
         # contract mirrors the mcp `feedback` tool.
         self._sdk.feedback(context_id, memory_id=memory_id, weight=weight)
+
+    def pin(self, context_id: str, memory_id: str) -> None:
+        self._sdk.update_memory(context_id, memory_id=memory_id, delivery_mode="always")
+
+    def unpin(self, context_id: str, memory_id: str) -> None:
+        self._sdk.update_memory(context_id, memory_id=memory_id, delivery_mode="on_recall")
 
     def remember(
         self, context_id: str, *, summary: str, content: str, type: str,

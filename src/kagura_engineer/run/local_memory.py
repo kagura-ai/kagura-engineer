@@ -62,23 +62,38 @@ class LocalMemoryClient:
         ).fetchall()
         return [r[0] for r in rows]
 
-    def recall(self, context_id: str, query: str, *, k: int = 5) -> list[str]:
-        return [s for _, s in self.recall_detailed(context_id, query, k=k)]
+    def recall(
+        self, context_id: str, query: str, *, k: int = 5,
+        tags: list[str] | None = None, min_importance: float = 0.0,
+    ) -> list[str]:
+        return [
+            s for _, s in self.recall_detailed(
+                context_id, query, k=k, tags=tags, min_importance=min_importance
+            )
+        ]
 
     def recall_detailed(
-        self, context_id: str, query: str, *, k: int = 5
+        self, context_id: str, query: str, *, k: int = 5,
+        tags: list[str] | None = None, min_importance: float = 0.0,
     ) -> list[tuple[str, str]]:
         # Distinct query terms; substring match (so "cat" also hits "category")
         # is intentional for a simple offline heuristic. Deduped so a repeated
         # term cannot inflate the overlap score.
         terms = {t for t in query.lower().split() if t}
+        want_tags = {t for t in (tags or []) if t}
         rows = self._conn.execute(
-            "SELECT id, summary, content, importance FROM memories WHERE context_id = ? "
-            "ORDER BY rowid DESC",
+            "SELECT id, summary, content, importance, tags FROM memories "
+            "WHERE context_id = ? ORDER BY rowid DESC",
             (context_id,),
         ).fetchall()
         scored: list[tuple[int, float, str, str]] = []
-        for mem_id, summary, content, importance in rows:
+        for mem_id, summary, content, importance, tags_json in rows:
+            if importance < min_importance:
+                continue
+            if want_tags:
+                row_tags = set(json.loads(tags_json) if tags_json else [])
+                if row_tags.isdisjoint(want_tags):
+                    continue  # tag filter: keep rows sharing ≥1 requested tag
             hay = f"{summary}\n{content}".lower()
             score = sum(1 for t in terms if t in hay)
             if terms and score == 0:
@@ -89,6 +104,20 @@ class LocalMemoryClient:
         # reinforced memories rank higher on later recalls (Hebbian-ish).
         scored.sort(key=lambda s: (s[0], s[1]), reverse=True)
         return [(s[2], s[3]) for s in scored[:k]]
+
+    def pin(self, context_id: str, memory_id: str) -> None:
+        self._conn.execute(
+            "UPDATE memories SET pinned = 1 WHERE id = ? AND context_id = ?",
+            (memory_id, context_id),
+        )
+        self._conn.commit()
+
+    def unpin(self, context_id: str, memory_id: str) -> None:
+        self._conn.execute(
+            "UPDATE memories SET pinned = 0 WHERE id = ? AND context_id = ?",
+            (memory_id, context_id),
+        )
+        self._conn.commit()
 
     def feedback(self, context_id: str, memory_id: str, *, weight: float = 1.0) -> None:
         # Reinforce: nudge importance toward 1.0 (capped). Importance is a

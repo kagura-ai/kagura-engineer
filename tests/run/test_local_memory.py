@@ -118,3 +118,36 @@ def test_feedback_caps_importance_at_one(tmp_path):
 def test_feedback_unknown_id_is_noop(tmp_path):
     c = _client(tmp_path)
     c.feedback(CTX, "does-not-exist")  # no row updated, no error
+
+
+def test_pin_unpin_drives_load_pinned(tmp_path):
+    c = _client(tmp_path)
+    a = c.remember(CTX, summary="pin me", content="x", type="note")
+    c.remember(CTX, summary="not pinned", content="x", type="note")
+    assert c.load_pinned(CTX) == []
+    c.pin(CTX, a)
+    assert c.load_pinned(CTX) == ["pin me"]
+    c.unpin(CTX, a)
+    assert c.load_pinned(CTX) == []
+
+
+def test_recall_tag_filter_keeps_any_match(tmp_path):
+    c = _client(tmp_path)
+    c.remember(CTX, summary="alpha sec", content="", type="note", tags=["security"])
+    c.remember(CTX, summary="alpha perf", content="", type="note", tags=["perf"])
+    assert c.recall(CTX, "alpha", tags=["security"]) == ["alpha sec"]
+    assert set(c.recall(CTX, "alpha", tags=["security", "perf"])) == {"alpha sec", "alpha perf"}
+
+
+def test_recall_min_importance_filter(tmp_path):
+    c = _client(tmp_path)
+    c.remember(CTX, summary="alpha low", content="", type="note")   # importance 0.5
+    b = c.remember(CTX, summary="alpha high", content="", type="note")
+    c.feedback(CTX, b)  # 0.5 -> 0.6
+    assert c.recall(CTX, "alpha", min_importance=0.55) == ["alpha high"]
+
+
+def test_pin_unknown_id_is_noop(tmp_path):
+    c = _client(tmp_path)
+    c.pin(CTX, "nope"); c.unpin(CTX, "nope")  # no row, no error
+    assert c.load_pinned(CTX) == []

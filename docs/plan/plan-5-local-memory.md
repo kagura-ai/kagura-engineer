@@ -62,6 +62,12 @@ offline impl with **zero new dependencies** (stdlib `sqlite3`), making grounded
   reinforces the memories that grounded it (recall→act→reinforce). Local impl
   bumps importance (a recall tie-break, so reinforced memories surface earlier);
   cloud impl passes through to the SDK `feedback`.
+- ✅ **local pinning + recall filters** — done: `MemoryClient` gained
+  `pin`/`unpin` (local toggles the `pinned` column → `load_pinned`; cloud toggles
+  `delivery_mode`) and `recall`/`recall_detailed` gained optional `tags`
+  (match-any) + `min_importance` filters (local filters in Python; cloud passes
+  them through to the SDK filter dict).
 - ⏳ Rich `explore` (Hebbian graph) + Sleep consolidation — Cloud-SDK + live
   integration; deferred.
-- ⏳ Embedding-based local recall, local pinning, importance/tag query filters.
+- ⏳ Embedding-based local recall (needs an embedding dep/model — weighed against
+  the deps-minimal constraint).
