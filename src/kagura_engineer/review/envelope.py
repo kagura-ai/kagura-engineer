@@ -41,6 +41,7 @@ class ReviewEnvelope:
         if not isinstance(data, dict):
             return cls(parsed=False)
 
+        # Normalized to lowercase so downstream gate comparisons are stable.
         verdict = data.get("verdict")
         verdict = verdict.strip().lower() if isinstance(verdict, str) else None
 
@@ -53,12 +54,15 @@ class ReviewEnvelope:
             for f in raw:
                 if not isinstance(f, dict):
                     continue
+                line = f.get("line")
                 findings.append(
+                    # Actor-side display slice of the reviewer's Finding —
+                    # rationale/suggestion/votes are intentionally omitted.
                     Finding(
                         dimension=str(f.get("dimension", "general")),
                         severity=str(f.get("severity", "INFO")),
                         file=str(f.get("file", "")),
-                        line=f.get("line") if isinstance(f.get("line"), int) else None,
+                        line=line if isinstance(line, int) else None,
                         title=str(f.get("title", "")),
                     )
                 )

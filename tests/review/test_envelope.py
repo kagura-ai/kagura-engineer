@@ -71,3 +71,10 @@ def test_unknown_schema_version_recorded():
 def test_non_list_findings_tolerated():
     env = ReviewEnvelope.from_text(json.dumps({"verdict": "green", "findings": "oops"}))
     assert env.findings == []
+
+
+def test_non_dict_toplevel_json_yields_unparsed():
+    # valid JSON, but not an object — must degrade safely, not raise
+    assert ReviewEnvelope.from_text("[]").parsed is False
+    assert ReviewEnvelope.from_text("null").parsed is False
+    assert ReviewEnvelope.from_text("42").parsed is False
