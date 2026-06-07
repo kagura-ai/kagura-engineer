@@ -1,258 +1,202 @@
-# kagura-agent
+# kagura-engineer
 
 > **Private repository.** Part of the Kagura Memory Cloud commercial offering.
->
-> **Status: Future placeholder.** No runnable code yet. This README is the
-> canonical design document until development begins. No fixed launch trigger —
-> development starts when memory-cloud + the chat ingestion / dataset /
-> embeddings workers have accumulated enough customer signal to justify
-> building a first-party agent on top.
+> Proprietary — © Kagura AI. See `LICENSE`.
 
-Autonomous AI agent built on the
-[Claude Agent SDK (Python)](https://docs.claude.com/en/api/agent-sdk).
-Uses [Kagura Memory Cloud](https://github.com/kagura-ai/memory-cloud) as its
-**long-term memory backbone** while orchestrating filesystem, shell, infra,
-and custom MCP servers to execute real, long-running tasks autonomously.
+An autonomous coding harness over [Claude Code](https://claude.ai/code) and
+[Kagura Memory Cloud](https://github.com/kagura-ai/memory-cloud).
+
+The long-term goal is a memory-backed **actor** that executes real, resumable
+coding tasks (see [Roadmap](#roadmap)). What ships **today** is the bootstrap
+layer that gets a machine ready to run it: a `doctor` that checks the dependency
+chain and a `setup` that resolves it.
 
 ---
 
-## What kagura-agent is — and is not
+## Status
 
-A common misread is "it's an AI that calls `recall` / `reference` / `explore`".
-That captures only the memory-reader role. The agent's defining capability is
-the combination of **memory + actor**:
-
-| | Narrow read (commodity) | What kagura-agent actually is |
+| Phase | Scope | State |
 |---|---|---|
-| **Brain** | Generic chat LLM | Claude (via Agent SDK Python, subscription or API key) |
-| **Memory** | Stateless or session-only | Kagura Memory Cloud as persistent backbone — accumulates across runs |
-| **Hands** | None — just answers | shell exec / filesystem / git / Docker / Cloudflare / cloud APIs (via MCP) |
-| **Time horizon** | One conversation | Long-running tasks resumable from memory state |
-| **Differentiation** | Anyone with Claude Desktop + memory MCP plugin matches it | Cost-aware planning + failure-mode learning + sub-agent dispatch with memory handoff |
+| **Plan 1** | `doctor` — diagnose the dependency chain | ✅ shipped |
+| **Plan 2** | `setup` — install + bootstrap the environment | ✅ shipped |
+| **Plan 3** | `run` — the idea-mode / task pipeline | 🚧 in design |
+| Plan 4+ | review gate, memory auto-store, worktree runs | 📋 planned |
 
-The agent is an **actor** in the topology — it lives entirely outside `memory-cloud`,
-which it treats as one of its MCP servers (the most important one). It can be run
-as a CLI, a daemon, or as a managed SaaS lane.
+`doctor` and `setup` are runnable now (186 tests green). `run` is a stub.
 
 ---
 
-## Architecture
+## Install
 
-```
-                    ┌───────────────────────────────────┐
-                    │   Claude Agent SDK (Python)        │
-                    │   subprocess-wraps Claude Code CLI │
-                    │   → subscription auth inherits     │
-                    └───────────────────────────────────┘
-                                      │
-                          orchestrates tool calls
-                                      │
-        ┌─────────────────────────────┼─────────────────────────────┐
-        ▼                ▼            ▼            ▼               ▼
-   ┌─────────┐   ┌───────────┐  ┌─────────┐  ┌─────────┐    ┌────────┐
-   │ memory- │   │filesystem │  │  shell  │  │cloudflare│    │ custom │
-   │ cloud   │   │   MCP     │  │   MCP   │  │   MCP   │    │  MCP   │
-   │  MCP    │   │           │  │ (Docker │  │  / aws  │    │ per-   │
-   │         │   │           │  │ -isolat)│  │  / gcp  │    │ tenant │
-   └─────────┘   └───────────┘  └─────────┘  └─────────┘    └────────┘
-        │
-   recall / reference / explore  ← read past learnings
-   remember / create_edge       ← write what was learned
-   ingest_events                ← push cost ledger / task tracker
+Requires **Python ≥ 3.11**.
+
+```bash
+pip install -e .            # from a checkout
+# or, with dev extras (pytest):
+pip install -e ".[dev]"
 ```
 
-### Auth model (from memory `31e85a92`)
-
-- **Python Agent SDK** wraps the Claude Code CLI as a subprocess →
-  the user's Pro/Max subscription is inherited automatically.
-- **Self-hosted / single-user mode**: flat subscription cost regardless
-  of agent load (within Anthropic's cap-based metering: 5h rolling +
-  weekly 7-day rolling). No per-token tracking required from kagura side.
-- **SaaS / multi-tenant mode**: per-tenant subscription is not viable.
-  Falls back to `workspace.external_api_keys` (BYOK) for Claude API key,
-  unifying with the chat-ingestion worker's BYOK auth path.
-- `ANTHROPIC_API_KEY` env, if set, overrides subscription auth.
-
-This dual-path (subscription for self-hosted, API key for SaaS) is the
-same pattern memory-cloud already uses for LLM provider keys.
+This exposes the `kagura-engineer` CLI (entry point `kagura_engineer.cli:app`).
 
 ---
 
-## Differentiating capabilities
+## Configuration
 
-The four capabilities below are what make memory + actor worth more than
-their sum. None of them are achievable with a stateless agent or a
-memory-less actor.
+Every command reads a `repo.yaml` (override with `--config / -c`):
 
-### 1. Cost-aware planning
-
-Before kicking off a multi-step task, the agent recalls past similar
-tasks' actual cost (token spend, time, retries, failure modes) and
-adjusts plan + budget accordingly. Example:
-
-```
-user: "deploy v0.16.1 to staging"
-
-agent:
-  → recall("deploy staging", filters={status: "failed"})
-  → finds 2 past failures (Caddyfile permission trap, env-file omission)
-  → adds explicit pre-flight checks for both before deploy
-  → reserves 30% buffer over avg historical cost
+```yaml
+profile: coding                                   # required
+memory_cloud_url: https://memory.kagura-ai.com    # required
+workspace_id: ws_xxxxxxxx                          # required — Memory Cloud scope
+context_id: 00000000-0000-0000-0000-000000000000  # required — context within the workspace
+ollama_url: http://localhost:11434                 # optional (default shown)
+review:
+  models: [qwen2.5-coder:7b, haiku]               # optional (default: [])
+  max_loops: 3                                      # optional (default: 3)
 ```
 
-### 2. Long-running task resume
-
-Context window dies; the agent doesn't. Task state is checkpointed to
-memory-cloud and resumed cleanly in a fresh session:
-
-```
-session 1 (interrupted):
-  remember(type="task-checkpoint", details={step: 4, pending: ["test", "deploy"]})
-
-session 2 (resumed):
-  recall("task-checkpoint", filters={task_id: ...}, k=1)
-  → "continuing from step 4 of N — pending: [test, deploy]"
-```
-
-### 3. Failure-mode learning
-
-Every failure becomes a memory with a `prevents` edge to its fix:
-
-```
-remember(
-  summary="Caddyfile cp fails when root-owned",
-  type="bug-fix",
-  details={trigger: "...", fix: "sudo chown ... && retry"}
-)
-create_edge(from=fix_memory, to=task_memory, type="prevents")
-```
-
-Next time the agent plans a similar task, the recall surfaces this fix
-preemptively. Failure cost → 0 over time on recurring patterns.
-
-### 4. Sub-agent dispatch with memory handoff
-
-A large task spawns child agents; context is passed not as prompt
-text but as memory IDs:
-
-```
-parent agent:
-  remember(summary="task context for child", scope="working", ttl=3600)
-  → returns memory_id
-
-  dispatch(child_agent, prompt="recall memory_id=<...> and execute")
-
-child agent:
-  recall(memory_id=<...>)
-  → child works on it, writes its own memories, finishes
-  → parent recalls child's output memories to continue
-```
-
-Parent context window stays small; complex pipelines become composable.
+`workspace_id → context_id → memory` is the Memory Cloud filter hierarchy.
+A missing required field, unparseable YAML, or an unreadable file fails with a
+clean error and **exit code 2**.
 
 ---
 
-## Phase 1 scope (when development begins)
+## Commands
 
-Tightly scoped to validate the "memory + actor" thesis before broadening:
+### `kagura-engineer doctor`
 
-| Capability | In | Out |
-|---|---|---|
-| shell exec (Docker-isolated) | ✅ | host shell ❌ |
-| filesystem read/write (project root) | ✅ | system-wide fs ❌ |
-| git ops (clone, commit, push) | ✅ | rebase / force-push ❌ |
-| `.env` and config file mgmt | ✅ | OS pkg install ❌ |
-| Cloudflare DNS read | ✅ | DNS write (Phase 2) |
-| `sudo apt install` etc. | ❌ Phase 2 | (surprisingly dangerous) |
-| memory-cloud full MCP toolset | ✅ | — |
+Checks the dependency chain and prints a status table (or `--json`). Each check
+is isolated — one failing check never aborts the rest of the run.
 
-The "surprisingly dangerous" note on `sudo apt install` reflects a real
-concern: package installation has the widest blast radius of any common
-ops action. It gets gated behind explicit Phase 2 review.
+| Check | Verifies |
+|---|---|
+| `git` | `git` on PATH, inside a work tree |
+| `claude-code` | `claude` on PATH + version, auth source (API key / subscription) |
+| `gh` | `gh` on PATH and authenticated |
+| `ollama` | daemon reachable at `ollama_url`, `review.models` present (tag-aware match) |
+| `haiku` | an Anthropic auth source resolves (env key or subscription cache) |
+| `memory-cloud` | `memory_cloud_url` reachable (host-only; credentials never echoed) |
 
----
+Statuses: **OK / WARN / FAIL**.
 
-## What kagura-agent is NOT
+```bash
+kagura-engineer doctor
+kagura-engineer doctor --json
+kagura-engineer doctor -c path/to/repo.yaml
+```
 
-To prevent scope creep, several adjacent things are explicitly out of scope:
+Exit codes: `0` all OK/WARN · `1` any FAIL · `2` config error.
 
-- **NOT a chat interface for memory-cloud.** That's covered by the existing
-  MCP server in memory-cloud + any MCP-capable client (Claude Desktop etc.).
-- **NOT a fine-tuned model.** It runs base Claude, not a customer-specific LLM.
-  Custom-model concerns belong to `kagura-memory-dataset-worker` Layer 2.
-- **NOT an ingestion source.** Slack / Teams chat ingestion belongs to
-  `kagura-memory-ai-worker`. The agent may *use* those memories, not produce them.
-- **NOT a memory analyzer.** broadlistening lives in memory-cloud.
-- **NOT a domain LLM** (Layer 3 rejected — see dataset-worker README).
+### `kagura-engineer setup`
 
-The agent's job is **autonomous task execution with persistent memory**,
-nothing more, nothing less.
+Resolves the same dependencies end-to-end: installs what's missing (via the
+platform package manager) and bootstraps auth. Idempotent and re-runnable.
 
----
-
-## Phase and launch trigger
-
-This repository is **not yet under active development**. No fixed launch date.
-Reasonable triggers to revisit:
-
-1. `kagura-memory-ai-worker` Phase 1+2 in production, accumulating
-   non-trivial customer memory.
-2. Internal dogfooding signal: the team has noticed they want
-   "agent that remembers past failures" while operating memory-cloud itself.
-3. Customer ask: at least one Enterprise customer explicitly wants
-   "an agent that uses our memory autonomously" (vs just an MCP client).
-
-Unlike the dataset / embeddings workers, this agent's launch is not
-tied to a specific quantitative break-even — it's a qualitative
-"the value of memory-as-backbone is clear enough to invest in an actor
-that depends on it" call.
-
----
-
-## Repository layout (planned)
+Steps run in canonical order:
 
 ```
-kagura-agent/
-├── README.md                       # this file
+git → claude-code → gh → ollama → ollama-models → memory-cloud
+```
+
+Statuses: **OK / SKIPPED / NEEDS_USER / FAIL**. Interactive actions (a login
+that can't be automated) surface as `NEEDS_USER`.
+
+```bash
+kagura-engineer setup                  # full run
+kagura-engineer setup --dry-run        # preview only; no side effects
+kagura-engineer setup --fix gh         # run a single step
+kagura-engineer setup --no-input       # never prompt; fail loudly on user-action steps
+kagura-engineer setup --json
+```
+
+Exit codes (Plan 2 design doc §1.6): `0` all OK/SKIPPED · `1` any FAIL
+(wins over 2) · `2` any NEEDS_USER, or a config / unknown `--fix` error.
+
+Valid `--fix` targets: `git`, `claude-code`, `gh`, `ollama`, `ollama-models`,
+`memory-cloud`.
+
+### `kagura-engineer run`
+
+The idea-mode pipeline. **Not implemented yet (Plan 3)** — currently prints a
+notice and exits 2.
+
+---
+
+## Project layout
+
+```
+kagura-engineer/
+├── README.md                  # this file
 ├── pyproject.toml
-├── src/
-│   ├── core/
-│   │   ├── session.py              # Claude Agent SDK wrapper
-│   │   ├── auth.py                 # subscription vs API key resolver
-│   │   └── budget.py               # cost-aware planning loop
-│   ├── mcp/
-│   │   ├── memory_cloud.py         # primary MCP — recall/remember/etc.
-│   │   ├── filesystem.py
-│   │   ├── shell_docker.py
-│   │   └── infra/
-│   │       ├── cloudflare.py
-│   │       ├── aws.py
-│   │       └── gcp.py
-│   ├── patterns/
-│   │   ├── checkpoint.py           # long-task resume
-│   │   ├── failure_learning.py     # remember(prevents) edges
-│   │   └── subagent_dispatch.py    # memory-id handoff
-│   └── cli/
-│       └── main.py                 # `kagura-agent run "task description"`
-├── tests/
-└── deploy/
-    ├── Dockerfile
-    └── compose.yml                 # single-user self-hosted
+├── docs/plan/                 # design docs (plan-2-setup.md, …)
+├── src/kagura_engineer/
+│   ├── cli.py                 # typer app: doctor / setup / run
+│   ├── config.py              # repo.yaml loader + Config (pydantic)
+│   ├── doctor/                # Plan 1 — checks, registry, result, render
+│   │   ├── checks.py
+│   │   ├── registry.py        # run_all(cfg) → [CheckResult], per-check isolation
+│   │   ├── result.py          # Status (OK/WARN/FAIL), CheckResult
+│   │   └── render.py          # table + json
+│   └── setup/                 # Plan 2 — step orchestrator
+│       ├── __init__.py        # STEP_NAMES, build_plan, run_plan → SetupReport
+│       ├── auth.py            # resolve_anthropic_auth (shared with doctor)
+│       ├── install.py         # run_install helper + stderr_tail
+│       ├── platform.py        # OS / package-manager / WSL detection
+│       ├── result.py          # StepStatus, StepResult, SetupReport
+│       ├── git.py · claude.py · gh.py · ollama.py · memory_cloud.py
+│       └── render.py
+└── tests/                     # pytest (pythonpath = src)
 ```
 
-Python, Claude Agent SDK Python, subprocess-wrapped Claude Code CLI.
+---
+
+## Development
+
+```bash
+pip install -e ".[dev]"
+pytest                         # 186 tests
+```
+
+`pyproject.toml` sets `pythonpath = ["src"]`, so `import kagura_engineer`
+resolves under pytest without an editable install.
+
+---
+
+## Roadmap
+
+The bootstrap CLI exists to stand up the environment for the actual product: a
+**memory + actor** harness. The defining capability is the combination, not the
+parts — a stateless agent or a memory-less actor doesn't get there.
+
+- **Cost-aware planning** — recall past similar tasks' real cost/failure modes
+  and budget the plan accordingly.
+- **Long-running task resume** — checkpoint task state to Memory Cloud; resume
+  cleanly in a fresh context after the window dies.
+- **Failure-mode learning** — every failure becomes a memory with a `prevents`
+  edge to its fix, surfaced preemptively next time. Recurring-failure cost → 0.
+- **Sub-agent dispatch with memory handoff** — children receive context as
+  memory IDs, not prompt text, keeping the parent context small.
+
+Claude is driven via the Claude Code CLI; a Pro/Max subscription is inherited
+for self-hosted use, with `ANTHROPIC_API_KEY` (BYOK) as the multi-tenant
+fallback. Memory Cloud is the persistent backbone, consumed as the primary MCP
+server (`recall` / `remember` / `create_edge` / `explore` / …).
+
+**Explicit non-goals:** not a chat interface for Memory Cloud, not a fine-tuned
+or domain model, not a chat-ingestion source, not a memory analyzer. The job is
+autonomous task execution with persistent memory — nothing more.
 
 ---
 
 ## Related repositories
 
-| Repo | Role | Relationship to agent |
+| Repo | Role | Relationship |
 |---|---|---|
-| [`kagura-ai/memory-cloud`](https://github.com/kagura-ai/memory-cloud) | Persistence + MCP server | **The backbone.** Agent's primary MCP. |
-| [`kagura-ai/kagura-memory-python-sdk`](https://github.com/kagura-ai/kagura-memory-python-sdk) | Primitive SDK | Used by the memory MCP client wrapper inside the agent. |
-| [`kagura-ai/kagura-memory-ai-worker`](https://github.com/kagura-ai/kagura-memory-ai-worker) | Chat ingestion | Produces memories the agent later reads. Not in the agent's execution path. |
-| [`kagura-ai/kagura-memory-dataset-worker`](https://github.com/kagura-ai/kagura-memory-dataset-worker) | Export + fine-tune | Independent. May export agent-produced memories as datasets. |
-| [`kagura-ai/kagura-embeddings-worker`](https://github.com/kagura-ai/kagura-embeddings-worker) | Sovereign embeddings | Indirect — agent's `recall` quality depends on which embeddings lane the workspace uses. |
+| [`memory-cloud`](https://github.com/kagura-ai/memory-cloud) | Persistence + MCP server | **The backbone.** Primary MCP. |
+| [`kagura-memory-python-sdk`](https://github.com/kagura-ai/kagura-memory-python-sdk) | Primitive SDK | Used by the memory MCP client wrapper. |
+| [`kagura-memory-ai-worker`](https://github.com/kagura-ai/kagura-memory-ai-worker) | Chat ingestion | Produces memories the harness later reads. |
+| [`kagura-memory-dataset-worker`](https://github.com/kagura-ai/kagura-memory-dataset-worker) | Export + fine-tune | Independent; may export harness-produced memories. |
+| [`kagura-embeddings-worker`](https://github.com/kagura-ai/kagura-embeddings-worker) | Sovereign embeddings | Indirect — `recall` quality depends on the workspace's embeddings lane. |
 
 ---
 
