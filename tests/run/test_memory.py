@@ -96,3 +96,15 @@ def test_resolve_memory_client_cloud(monkeypatch, tmp_path):
     monkeypatch.setattr(mem_mod.KaguraCloudClient, "from_config",
                         classmethod(lambda cls, cfg: sentinel))
     assert mem_mod.resolve_memory_client(_cfg_backend("cloud", tmp_path)) is sentinel
+
+
+def test_invalid_memory_backend_raises_config_error(tmp_path):
+    import pytest
+    from kagura_engineer.config import ConfigError, load_config
+    cfg = tmp_path / "repo.yaml"
+    cfg.write_text(
+        "profile: t\nmemory_cloud_url: http://x\nworkspace_id: w\n"
+        "context_id: c\nmemory_backend: bogus\n"
+    )
+    with pytest.raises(ConfigError):
+        load_config(str(cfg))

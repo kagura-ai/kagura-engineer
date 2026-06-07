@@ -49,6 +49,8 @@ class LocalMemoryClient:
         self._path = Path(db_path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self._path))
+        # Wait (not error) if another single-run process holds the write lock.
+        self._conn.execute("PRAGMA busy_timeout = 5000")
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
 
@@ -61,7 +63,10 @@ class LocalMemoryClient:
         return [r[0] for r in rows]
 
     def recall(self, context_id: str, query: str, *, k: int = 5) -> list[str]:
-        terms = [t for t in query.lower().split() if t]
+        # Distinct query terms; substring match (so "cat" also hits "category")
+        # is intentional for a simple offline heuristic. Deduped so a repeated
+        # term cannot inflate the overlap score.
+        terms = {t for t in query.lower().split() if t}
         rows = self._conn.execute(
             "SELECT summary, content, importance FROM memories WHERE context_id = ? "
             "ORDER BY rowid DESC",
