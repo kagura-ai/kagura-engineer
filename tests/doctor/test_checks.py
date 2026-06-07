@@ -267,7 +267,7 @@ def test_haiku_ok_with_legacy_claude_json(monkeypatch, tmp_path):
     # Legacy fallback: ~/.claude.json exists, ~/.claude/.credentials.json does not.
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     fake_home = tmp_path
-    (fake_home / ".claude.json").write_text("{}")
+    (fake_home / ".claude.json").write_text('{"oauthAccount": {"emailAddress": "x@example.com"}}')
     monkeypatch.setattr(auth_module.Path, "home", classmethod(lambda cls: fake_home))
     r = checks.check_haiku()
     assert r.status is Status.OK

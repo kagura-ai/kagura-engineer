@@ -67,13 +67,39 @@ def test_subscription_cache_modern(monkeypatch, tmp_path):
 def test_subscription_cache_legacy_when_modern_absent(monkeypatch, tmp_path):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     legacy = tmp_path / ".claude.json"
-    legacy.write_text("{}")
+    # The legacy file proves a login only when it carries an oauthAccount.
+    legacy.write_text('{"oauthAccount": {"emailAddress": "x@example.com"}}')
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
 
     res = resolve_anthropic_auth()
     assert res.method is AuthMethod.SUBSCRIPTION_CACHE
     assert res.cache_path == legacy
     assert "legacy" in res.detail
+
+
+def test_legacy_claude_json_without_oauth_account_is_not_login(monkeypatch, tmp_path):
+    # ~/.claude.json is Claude Code's general config (startups, projects,
+    # tips); it is non-empty for anyone who has merely launched `claude`.
+    # Without an oauthAccount marker it must NOT count as a subscription login
+    # — otherwise an unauthenticated user is reported as authed and the
+    # failure only surfaces at the first real Claude call.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    legacy = tmp_path / ".claude.json"
+    legacy.write_text('{"numStartups": 3, "projects": {}, "tipsHistory": {}}')
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+
+    res = resolve_anthropic_auth()
+    assert res.method is AuthMethod.NONE
+
+
+def test_legacy_claude_json_invalid_json_is_not_login(monkeypatch, tmp_path):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    legacy = tmp_path / ".claude.json"
+    legacy.write_text("not json {{{")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+
+    res = resolve_anthropic_auth()
+    assert res.method is AuthMethod.NONE
 
 
 def test_modern_cache_wins_over_legacy(monkeypatch, tmp_path):

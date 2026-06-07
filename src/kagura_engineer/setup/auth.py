@@ -28,6 +28,7 @@ during `setup --no-input` validation without a TTY dependency.
 from __future__ import annotations
 
 import enum
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -74,23 +75,39 @@ def resolve_anthropic_auth(
             detail=raw,
         )
 
-    # 2. Subscription credential cache. We try the modern location
-    # first; only fall back to the legacy one if the modern is absent
-    # (not unreadable — the user might have a permission issue worth
-    # knowing about, and falling through silently would hide it).
+    # 2. Subscription credential cache. The modern location is a pure
+    # credential store, so any non-empty content is proof of a login.
     modern = home / ".claude" / ".credentials.json"
+    try:
+        if modern.read_text():
+            return AuthResolution(
+                method=AuthMethod.SUBSCRIPTION_CACHE,
+                detail=f"subscription login detected (modern cache: {modern})",
+                cache_path=modern,
+            )
+    except OSError:
+        pass
+
+    # 3. Legacy fallback. `~/.claude.json` is NOT a credential store — it
+    # is Claude Code's general config file (startups, projects, tips) and
+    # is non-empty for anyone who has merely launched `claude`. Mere
+    # presence proves nothing; only an `oauthAccount` entry proves that a
+    # subscription login actually happened.
     legacy = home / ".claude.json"
-    for path, kind in ((modern, "modern"), (legacy, "legacy")):
+    try:
+        raw = legacy.read_text()
+    except OSError:
+        raw = ""
+    if raw:
         try:
-            if path.read_text():
+            if json.loads(raw).get("oauthAccount"):
                 return AuthResolution(
                     method=AuthMethod.SUBSCRIPTION_CACHE,
-                    detail=f"subscription login detected ({kind} cache: {path})",
-                    cache_path=path,
+                    detail=f"subscription login detected (legacy cache: {legacy})",
+                    cache_path=legacy,
                 )
-        except OSError:
-            # Permission denied / file missing / etc. Skip this slot
-            # and let the loop try the next one.
-            continue
+        except (ValueError, AttributeError):
+            # Not JSON, or JSON that isn't an object: not a credible login.
+            pass
 
     return AuthResolution(method=AuthMethod.NONE, detail="")
