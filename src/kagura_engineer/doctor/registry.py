@@ -18,6 +18,9 @@ _CHECKS: list[tuple[str, callable]] = [
     ("gh", lambda c: checks.check_gh()),
     ("ollama", lambda c: checks.check_ollama(c.ollama_url, required=c.review.models)),
     ("haiku", lambda c: checks.check_haiku()),
+    # "memory" is the generic group/crash-fallback label; the concrete check
+    # emits the backend-specific display name ("memory-cloud" / "memory-local")
+    # on success — "memory" only appears if the check itself raises.
     ("memory", lambda c: (
         checks.check_local_memory(c.local_memory_path)
         if c.memory_backend == "local"
