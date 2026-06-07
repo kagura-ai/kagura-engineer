@@ -2,6 +2,8 @@ from typer.testing import CliRunner
 
 from kagura_engineer.cli import app
 from kagura_engineer.doctor.result import CheckResult, Status
+from kagura_engineer.review.envelope import ReviewEnvelope
+from kagura_engineer.review.reviewer import ReviewerResult
 from kagura_engineer.setup.result import SetupReport, StepResult, StepStatus
 
 runner = CliRunner()
@@ -260,9 +262,6 @@ def test_doctor_malformed_yaml_clean_error(tmp_path):
 
 
 # --- review: exit code + JSON contract -------------------------------------
-
-from kagura_engineer.review.envelope import ReviewEnvelope
-from kagura_engineer.review.reviewer import ReviewerResult
 
 
 def _write_cfg_review(tmp_path):
