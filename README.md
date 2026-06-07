@@ -20,10 +20,11 @@ chain and a `setup` that resolves it.
 | **Plan 1** | `doctor` — diagnose the dependency chain | ✅ shipped |
 | **Plan 2** | `setup` — install + bootstrap the environment | ✅ shipped |
 | **Plan 3** | `run` — memory-grounded agent loop (issue→PR) | ✅ done |
-| **Plan 4** | `review` — launch the reviewer, gate on its JSON verdict | ✅ done (v1) |
-| Plan 4b+ | auto-review/fix loop, memory auto-store, worktree runs | 📋 planned |
+| **Plan 4** | `review` — launch the reviewer, gate on its JSON verdict | ✅ done |
+| **Plan 4b** | `review --fix` — auto-review/fix loop | ✅ done |
+| Plan 5+ | local memory (SQLite), memory auto-store, worktree runs | 📋 planned |
 
-`doctor`, `setup`, `run`, and `review` are runnable now (289 tests green).
+`doctor`, `setup`, `run`, and `review` are runnable now (307 tests green).
 
 ---
 
@@ -164,10 +165,21 @@ kagura-engineer review feat/x          # review a branch
 kagura-engineer review 42              # review PR #42 (resolved to its branch)
 kagura-engineer review --base develop  # diff against a different base
 kagura-engineer review --json          # machine-readable report
+kagura-engineer review --fix           # auto-fix loop (Plan 4b)
 ```
 
 Exit codes: `0` green/yellow (or nothing to review) · `1` could not review
 (reviewer infra error) · `2` red (blocking findings — resumable).
+
+With `--fix`, a red verdict triggers the **auto-fix loop**: `claude -p` reads
+the persisted findings, fixes the blocking ones and commits, then re-reviews —
+repeating up to `review.max_loops` times. The reviewer stays bounded (it only
+emits findings); the actor does the edits. A review that *couldn't run* (infra
+error) never triggers a fix.
+
+`--fix` commits to (and re-reviews) the **currently checked-out branch**, so
+check out the branch you want fixed before running it — for `review <PR#> --fix`
+that means the PR's head branch.
 
 ---
 

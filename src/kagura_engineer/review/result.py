@@ -46,3 +46,27 @@ class ReviewReport:
     resume_hint: str | None = None
     report_path: str | None = None
     duration_s: float = 0.0
+
+
+@dataclass(frozen=True)
+class ReviewLoopReport:
+    """Plan 4b auto-fix loop result: an ordered list of per-iteration reviews
+    (review → fix → re-review …) plus the loop's terminal status.
+
+    `status` carries the same ReviewStatus meaning, decided by the loop:
+      OK       — a fix made the review green/yellow (or it was already clean)
+      BLOCKED  — still red after the fix budget (max_loops) was spent
+      FAIL     — could not review, or a fixer invocation failed
+    """
+    target: str
+    base: str
+    iterations: list[ReviewReport] = field(default_factory=list)
+    fixes_attempted: int = 0
+    status: ReviewStatus = ReviewStatus.OK
+    detail: str = ""
+    resume_hint: str | None = None
+    duration_s: float = 0.0
+
+    @property
+    def final(self) -> ReviewReport | None:
+        return self.iterations[-1] if self.iterations else None

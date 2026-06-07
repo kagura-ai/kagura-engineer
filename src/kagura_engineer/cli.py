@@ -10,6 +10,9 @@ from .run import STATUS_EXIT, run_idea
 from .run.render import print_table as run_print_table
 from .run.render import to_json as run_to_json
 from .review import REVIEW_STATUS_EXIT, review_pr
+from .review.loop import review_fix_loop
+from .review.render import loop_to_json as review_loop_to_json
+from .review.render import print_loop_table as review_print_loop_table
 from .review.render import print_table as review_print_table
 from .review.render import to_json as review_to_json
 from .setup import STEP_NAMES, build_plan, run_plan
@@ -153,7 +156,7 @@ def run(
 
 
 # ---------------------------------------------------------------------------
-# review (Plan 4 — reviewer 連結, v1: review + gate)
+# review (Plan 4 — reviewer 連結; --fix = Plan 4b auto-review/fix loop)
 # ---------------------------------------------------------------------------
 
 
@@ -161,19 +164,33 @@ def run(
 def review(
     target: str = typer.Argument("HEAD", help="git ref, branch, or PR number to review as head"),
     base: str = typer.Option("main", "--base", help="base ref to diff against"),
+    fix: bool = typer.Option(
+        False, "--fix", help="auto-fix loop: on red, claude -p fixes findings and re-reviews"
+    ),
     config: str = _CONFIG_OPT,
     json_out: bool = typer.Option(False, "--json"),
 ) -> None:
     """Launch kagura-code-reviewer on a PR/branch and gate on its JSON verdict.
 
+    With --fix, run the Plan 4b loop: on a red verdict, claude -p fixes the
+    blocking findings and commits, then re-reviews — up to `review.max_loops`.
+
     Exit codes: 0 = green/yellow (or nothing to review) · 1 = could not
-    review (reviewer infra error) · 2 = red (blocking findings — resumable).
+    review / a fix failed · 2 = red (blocking findings — resumable).
     """
     try:
         cfg = load_config(config)
     except ConfigError as exc:
         typer.echo(f"review: invalid config '{config}': {exc}", err=True)
         raise typer.Exit(code=2)
+
+    if fix:
+        loop_report = review_fix_loop(cfg, target, base=base)
+        if json_out:
+            typer.echo(review_loop_to_json(loop_report))
+        else:
+            review_print_loop_table(loop_report)
+        raise typer.Exit(code=REVIEW_STATUS_EXIT[loop_report.status])
 
     report = review_pr(cfg, target, base=base)
 

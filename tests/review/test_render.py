@@ -28,3 +28,33 @@ def test_print_table_runs(capsys):
     out = capsys.readouterr().out
     assert "SQLi" in out
     assert "red" in out
+
+
+def _loop_report(status, n_iters, fixes):
+    from kagura_engineer.review.result import ReviewLoopReport
+    iters = [
+        ReviewReport(target="HEAD", base="main", verdict="red", status=ReviewStatus.BLOCKED,
+                     findings=[Finding("security", "HIGH", "a.py", 3, "SQLi")])
+        for _ in range(n_iters - 1)
+    ] + [_report() if status is ReviewStatus.BLOCKED else
+         ReviewReport(target="HEAD", base="main", verdict="green", status=ReviewStatus.OK)]
+    return ReviewLoopReport(target="HEAD", base="main", iterations=iters,
+                            fixes_attempted=fixes, status=status, detail="d")
+
+
+def test_loop_to_json_includes_iterations():
+    from kagura_engineer.review.render import loop_to_json
+    data = json.loads(loop_to_json(_loop_report(ReviewStatus.OK, 2, 1)))
+    assert data["status"] == "ok"
+    assert data["fixes_attempted"] == 1
+    assert len(data["iterations"]) == 2
+    assert data["iterations"][0]["verdict"] == "red"
+    assert data["iterations"][-1]["verdict"] == "green"
+
+
+def test_print_loop_table_runs(capsys):
+    from kagura_engineer.review.render import print_loop_table
+    print_loop_table(_loop_report(ReviewStatus.OK, 2, 1))
+    out = capsys.readouterr().out
+    assert "fix(es)" in out
+    assert "iterations:" in out  # multi-iteration trail shown

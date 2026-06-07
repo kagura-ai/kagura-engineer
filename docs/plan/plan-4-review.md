@@ -1348,7 +1348,7 @@ git commit -m "docs(review): mark Plan 4 v1 done + document review command"
 
 ## Out of scope (explicit deferrals)
 
-- **auto-review/auto-fix loop** (red → `claude -p` fix → re-review → repeat to `cfg.review.max_loops`) — Plan 4b. `ReviewConfig.max_loops` already exists for it.
+- ~~**auto-review/auto-fix loop**~~ — **done in Plan 4b** as `kagura-engineer review --fix` (`review/fixer.py` + `review/loop.py`): red → `claude -p` fixes blocking findings + commits → re-review, bounded by `cfg.review.max_loops`. Infra-FAIL never triggers a fix.
 - **doctor check** for `kagura-code-reviewer` on PATH — optional follow-up (orchestrator already degrades to a clean FAIL if it is absent).
 - **caller-side context cap** — the reviewer caps injected context at ~12k chars (R5); a redundant caller cap is deferred.
 - **posting findings to the PR** (inline comments) — reviewer/`gh-issue-driven:review` territory, not this slice.
