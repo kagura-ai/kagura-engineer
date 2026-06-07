@@ -180,3 +180,17 @@ def test_cloud_pin_unpin_passthrough():
     c.pin("ctx", "m1")
     c.unpin("ctx", "m1")
     assert calls == [("m1", "always"), ("m1", "on_recall")]
+
+
+def test_cloud_explore_passthrough_and_parse():
+    from kagura_engineer.run.memory import KaguraCloudClient
+    seen = {}
+
+    class _Sdk:
+        def explore(self, context_id, *, memory_id, depth):
+            seen.update(memory_id=memory_id, depth=depth)
+            return {"nodes": [{"memory_id": "a", "summary": "A"}, {"summary": "no-id"}]}
+
+    out = KaguraCloudClient(_Sdk()).explore("ctx", "seed", depth=2)
+    assert seen == {"memory_id": "seed", "depth": 2}
+    assert out == [("a", "A")]  # id-less node dropped

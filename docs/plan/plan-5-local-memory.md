@@ -67,7 +67,13 @@ offline impl with **zero new dependencies** (stdlib `sqlite3`), making grounded
   `delivery_mode`) and `recall`/`recall_detailed` gained optional `tags`
   (match-any) + `min_importance` filters (local filters in Python; cloud passes
   them through to the SDK filter dict).
-- ⏳ Rich `explore` (Hebbian graph) + Sleep consolidation — Cloud-SDK + live
-  integration; deferred.
-- ⏳ Embedding-based local recall (needs an embedding dep/model — weighed against
-  the deps-minimal constraint).
+- ✅ **`explore` (graph discovery)** — done: `MemoryClient.explore(context_id,
+  memory_id, depth)` → related `(id, summary)` pairs. Cloud passes through to the
+  Hebbian-graph explore; local approximates it as single-hop tag-overlap
+  neighbors of the seed.
+- ✅ **local `decay`** — the offline Sleep-adjacent maintenance primitive:
+  `LocalMemoryClient.decay(context_id, factor)` multiplies every importance by
+  `factor`, relaxing feedback()'s ratchet-up over time. (Full Cloud **Sleep
+  consolidation** is server-side, not a client call — out of scope here.)
+- ⏳ Embedding-based local recall — needs an embedding dep/model, weighed against
+  the deps-minimal constraint; deferred pending that decision.

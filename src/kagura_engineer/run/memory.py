@@ -42,6 +42,10 @@ class MemoryClient(Protocol):
     # Pin / unpin a memory so load_pinned surfaces it (delivery_mode toggle).
     def pin(self, context_id: str, memory_id: str) -> None: ...
     def unpin(self, context_id: str, memory_id: str) -> None: ...
+    # Graph discovery from a seed memory → related (memory_id, summary) pairs.
+    def explore(
+        self, context_id: str, memory_id: str, *, depth: int = 1
+    ) -> list[tuple[str, str]]: ...
     def get_state(self, context_id: str, key: str) -> dict | None: ...
     def set_state(self, context_id: str, key: str, value: dict) -> None: ...
 
@@ -120,6 +124,19 @@ class KaguraCloudClient:
 
     def unpin(self, context_id: str, memory_id: str) -> None:
         self._sdk.update_memory(context_id, memory_id=memory_id, delivery_mode="on_recall")
+
+    def explore(
+        self, context_id: str, memory_id: str, *, depth: int = 1
+    ) -> list[tuple[str, str]]:
+        # SDK passthrough to the Hebbian-graph explore. Defensive parse: the
+        # response surfaces related nodes under "nodes" or "results".
+        resp = self._sdk.explore(context_id, memory_id=memory_id, depth=depth)
+        nodes = resp.get("nodes") or resp.get("results") or []
+        return [
+            (n["memory_id"], n["summary"])
+            for n in nodes
+            if n.get("memory_id") and n.get("summary")
+        ]
 
     def remember(
         self, context_id: str, *, summary: str, content: str, type: str,

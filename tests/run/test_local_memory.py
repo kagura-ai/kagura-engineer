@@ -151,3 +151,30 @@ def test_pin_unknown_id_is_noop(tmp_path):
     c = _client(tmp_path)
     c.pin(CTX, "nope"); c.unpin(CTX, "nope")  # no row, no error
     assert c.load_pinned(CTX) == []
+
+
+def test_explore_returns_tag_neighbors_excluding_seed(tmp_path):
+    c = _client(tmp_path)
+    seed = c.remember(CTX, summary="seed", content="", type="note", tags=["auth", "db"])
+    c.remember(CTX, summary="neighbor auth", content="", type="note", tags=["auth"])
+    c.remember(CTX, summary="unrelated", content="", type="note", tags=["ui"])
+    names = [s for _, s in c.explore(CTX, seed)]
+    assert "neighbor auth" in names
+    assert "unrelated" not in names
+    assert "seed" not in names  # excludes the seed itself
+
+
+def test_explore_unknown_or_untagged_seed_is_empty(tmp_path):
+    c = _client(tmp_path)
+    assert c.explore(CTX, "nope") == []
+    s = c.remember(CTX, summary="no tags", content="", type="note")
+    assert c.explore(CTX, s) == []
+
+
+def test_decay_lowers_importance(tmp_path):
+    c = _client(tmp_path)
+    c.remember(CTX, summary="alpha", content="", type="note")  # importance 0.5
+    assert c.recall(CTX, "alpha", min_importance=0.45) == ["alpha"]
+    assert c.decay(CTX, factor=0.5) == 1  # 0.5 -> 0.25
+    assert c.recall(CTX, "alpha", min_importance=0.45) == []      # filtered out
+    assert c.recall(CTX, "alpha", min_importance=0.2) == ["alpha"]  # still there

@@ -119,6 +119,46 @@ class LocalMemoryClient:
         )
         self._conn.commit()
 
+    def explore(
+        self, context_id: str, memory_id: str, *, depth: int = 1
+    ) -> list[tuple[str, str]]:
+        """Offline graph approximation: memories sharing ≥1 tag with the seed
+        (single hop — `depth` is accepted for Protocol parity but not walked,
+        as the local store has no real edge graph), ranked importance then
+        recency. Empty if the seed is unknown or has no tags."""
+        seed = self._conn.execute(
+            "SELECT tags FROM memories WHERE id = ? AND context_id = ?",
+            (memory_id, context_id),
+        ).fetchone()
+        if not seed:
+            return []
+        seed_tags = set(json.loads(seed[0]) if seed[0] else [])
+        if not seed_tags:
+            return []
+        rows = self._conn.execute(
+            "SELECT id, summary, tags FROM memories WHERE context_id = ? AND id != ? "
+            "ORDER BY importance DESC, rowid DESC",
+            (context_id, memory_id),
+        ).fetchall()
+        out: list[tuple[str, str]] = []
+        for mid, summary, tags_json in rows:
+            row_tags = set(json.loads(tags_json) if tags_json else [])
+            if seed_tags & row_tags:
+                out.append((mid, summary))
+        return out
+
+    def decay(self, context_id: str, *, factor: float = 0.9) -> int:
+        """Offline Sleep-adjacent maintenance: multiply every memory's importance
+        by `factor` (0<factor<=1), countering feedback()'s ratchet-up so stale
+        reinforced memories relax back over time. Returns the row count touched.
+        (Full Cloud Sleep consolidation is server-side, not a client call.)"""
+        cur = self._conn.execute(
+            "UPDATE memories SET importance = MAX(0.0, importance * ?) WHERE context_id = ?",
+            (factor, context_id),
+        )
+        self._conn.commit()
+        return cur.rowcount
+
     def feedback(self, context_id: str, memory_id: str, *, weight: float = 1.0) -> None:
         # Reinforce: nudge importance toward 1.0 (capped). Importance is a
         # recall tie-breaker, so reinforced memories surface earlier next time.
