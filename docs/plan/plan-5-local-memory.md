@@ -70,7 +70,9 @@ offline impl with **zero new dependencies** (stdlib `sqlite3`), making grounded
 - ✅ **`explore` (graph discovery)** — done: `MemoryClient.explore(context_id,
   memory_id, depth)` → related `(id, summary)` pairs. Cloud passes through to the
   Hebbian-graph explore; local approximates it as single-hop tag-overlap
-  neighbors of the seed.
+  neighbors of the seed. **Wired into `run`'s grounding** (recall→explore): the
+  top recall hit's neighbours are appended to the phase context, best-effort
+  (an explore failure never fails recall) and bounded by `_GROUNDING_CAP`.
 - ✅ **local `decay`** — the offline Sleep-adjacent maintenance primitive:
   `LocalMemoryClient.decay(context_id, factor)` multiplies every importance by
   `factor`, relaxing feedback()'s ratchet-up over time. (Full Cloud **Sleep

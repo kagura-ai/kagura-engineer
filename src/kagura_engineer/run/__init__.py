@@ -41,6 +41,10 @@ STATUS_EXIT: dict[RunStatus, int] = {
 
 _PHASES = ("start", "ship")
 
+# Soft cap on grounding lines injected into the phase prompt (pinned + recall +
+# explore neighbours), so graph enrichment can't balloon the context.
+_GROUNDING_CAP = 12
+
 
 def _state_key(issue: int) -> str:
     return f"run:{issue}"
@@ -89,6 +93,20 @@ def run_idea(
         _log.exception("run recall phase failed")
         phases.append(PhaseResult("recall", RunStatus.FAIL, f"memory recall failed: {type(exc).__name__}: {exc}"))
         return _finish()
+
+    # 1a. expand grounding with graph neighbours of the top hit (recall→explore):
+    # related past work the direct query missed. Best-effort — an explore failure
+    # must NOT fail recall (a hard FAIL above); a soft cap bounds injected context.
+    if recalled:
+        try:
+            seen = set(grounding)
+            for _, summary in mem.explore(cfg.context_id, recalled[0][0], depth=1):
+                if summary and summary not in seen and len(grounding) < _GROUNDING_CAP:
+                    grounding.append(summary)
+                    seen.add(summary)
+        except Exception:  # noqa: BLE001 — graph enrichment is best-effort
+            _log.exception("run explore enrichment failed (non-fatal)")
+
     detail = f"{len(grounding)} memories" + (" (resuming)" if resumed else "")
     phases.append(PhaseResult("recall", RunStatus.OK, detail))
 

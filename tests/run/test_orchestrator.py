@@ -22,10 +22,12 @@ class _FakeMemory:
         self.state = {}
         self.remembered = []
         self.feedback_calls = []
+        self.explore_result = []
 
     def load_pinned(self, context_id): return ["guardrail: TDD"]
     def recall(self, context_id, query, *, k=5): return ["decision A"]
     def recall_detailed(self, context_id, query, *, k=5): return [("m1", "decision A")]
+    def explore(self, context_id, memory_id, *, depth=1): return self.explore_result
     def feedback(self, context_id, memory_id, *, weight=1.0):
         self.feedback_calls.append(memory_id)
     def remember(self, context_id, *, summary, content, type, tags=None):
@@ -266,3 +268,42 @@ def test_feedback_failure_does_not_lose_savepoint(monkeypatch):
     assert report.status is RunStatus.OK
     assert any(t == "savepoint" for t, _ in mem.remembered)   # savepoint written
     assert mem.state.get("run:42") == {"done": True, "pr_url": "https://x/pull/9"}  # done-state set
+
+
+def test_grounding_enriched_with_explore_neighbors(monkeypatch):
+    captured = {}
+    monkeypatch.setattr("kagura_engineer.run.run_all",
+                        lambda cfg: [CheckResult("gh-issue-driven", Status.OK, "x")])
+    monkeypatch.setattr("kagura_engineer.run.ensure_worktree",
+                        lambda root, issue, base="HEAD": Path(f"/wt/run-{issue}"))
+
+    def _invoke(phase, issue, worktree, grounding, **kw):
+        captured["grounding"] = list(grounding)
+        return PhaseInvocation(phase, 0, "", "", "green", "https://x/pull/1")
+
+    monkeypatch.setattr("kagura_engineer.run.invoke_phase", _invoke)
+    mem = _FakeMemory()
+    mem.explore_result = [("n1", "RELATED neighbor")]
+    report = run_idea(_cfg(), 9, memory=mem, repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK
+    g = captured["grounding"]
+    assert "guardrail: TDD" in g and "decision A" in g  # pinned + recall
+    assert "RELATED neighbor" in g                       # explore enrichment
+
+
+def test_explore_failure_does_not_fail_recall(monkeypatch):
+    monkeypatch.setattr("kagura_engineer.run.run_all",
+                        lambda cfg: [CheckResult("gh-issue-driven", Status.OK, "x")])
+    monkeypatch.setattr("kagura_engineer.run.ensure_worktree",
+                        lambda root, issue, base="HEAD": Path(f"/wt/run-{issue}"))
+    monkeypatch.setattr("kagura_engineer.run.invoke_phase",
+                        lambda phase, issue, wt, g, **kw: PhaseInvocation(phase, 0, "", "", "green", "https://x/pull/1"))
+
+    class _ExplodeExplore(_FakeMemory):
+        def explore(self, context_id, memory_id, *, depth=1):
+            raise RuntimeError("explore down")
+
+    report = run_idea(_cfg(), 9, memory=_ExplodeExplore(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK  # explore failure is non-fatal
+    recall_phase = next(p for p in report.phases if p.name == "recall")
+    assert recall_phase.status is RunStatus.OK
