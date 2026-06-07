@@ -144,12 +144,8 @@ def run_idea(
 
     # 5. persist. The PR already exists, so a persist failure is non-fatal:
     # the run still succeeded; we record the lost savepoint in the detail.
-    # We also reinforce the memories that grounded this successful run, so the
-    # ones that actually helped surface earlier next time (recall→act→reinforce).
     if not no_remember:
         try:
-            for mid in recalled_ids:
-                mem.feedback(cfg.context_id, mid)
             mem.remember(
                 cfg.context_id,
                 summary=f"run #{issue} → PR {pr_url or '(no url)'}",
@@ -158,10 +154,18 @@ def run_idea(
                 tags=[f"repo:{root.name}", "run", f"issue:{issue}"],
             )
             mem.set_state(cfg.context_id, _state_key(issue), {"done": True, "pr_url": pr_url})
-            reinforced = f"; reinforced {len(recalled_ids)} memories" if recalled_ids else ""
-            phases.append(PhaseResult("persist", RunStatus.OK, f"savepoint stored{reinforced}"))
+            phases.append(PhaseResult("persist", RunStatus.OK, "savepoint stored"))
         except Exception as exc:  # noqa: BLE001 — PR is done; persist is best-effort
             _log.exception("run persist phase failed (non-fatal)")
             phases.append(PhaseResult("persist", RunStatus.OK, f"savepoint store failed (non-fatal): {type(exc).__name__}"))
+
+        # Reinforce the memories that grounded this successful run — best-effort
+        # and AFTER the savepoint/done-state, so a feedback hiccup can never cost
+        # us the resume marker (recall→act→reinforce).
+        for mid in recalled_ids:
+            try:
+                mem.feedback(cfg.context_id, mid)
+            except Exception:  # noqa: BLE001 — reinforcement is best-effort
+                _log.exception("run feedback failed (non-fatal)")
 
     return _finish(pr_url=pr_url, worktree=str(wt))

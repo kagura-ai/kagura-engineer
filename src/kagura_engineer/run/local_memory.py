@@ -94,7 +94,7 @@ class LocalMemoryClient:
         # Reinforce: nudge importance toward 1.0 (capped). Importance is a
         # recall tie-breaker, so reinforced memories surface earlier next time.
         self._conn.execute(
-            "UPDATE memories SET importance = MIN(1.0, importance + ?) "
+            "UPDATE memories SET importance = MAX(0.0, MIN(1.0, importance + ?)) "
             "WHERE id = ? AND context_id = ?",
             (0.1 * weight, memory_id, context_id),
         )

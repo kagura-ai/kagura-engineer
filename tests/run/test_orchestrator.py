@@ -247,3 +247,22 @@ def test_no_remember_skips_reinforcement(monkeypatch):
     mem = _FakeMemory()
     run_idea(_cfg(), 9, no_remember=True, memory=mem, repo_root=Path("/repo"))
     assert mem.feedback_calls == []
+
+
+def test_feedback_failure_does_not_lose_savepoint(monkeypatch):
+    # a feedback hiccup must NOT skip remember/set_state(done) — cheap-resume
+    # depends on the done-state being written.
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+
+    class _BrokenFeedback(_FakeMemory):
+        def feedback(self, context_id, memory_id, *, weight=1.0):
+            raise RuntimeError("feedback endpoint down")
+
+    mem = _BrokenFeedback()
+    report = run_idea(_cfg(), 42, memory=mem, repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK
+    assert any(t == "savepoint" for t, _ in mem.remembered)   # savepoint written
+    assert mem.state.get("run:42") == {"done": True, "pr_url": "https://x/pull/9"}  # done-state set

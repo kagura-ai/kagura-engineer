@@ -1,8 +1,8 @@
 """Memory Cloud client for the `run` agent loop.
 
-`MemoryClient` is the narrow Protocol the orchestrator depends on — just
-the five methods the loop needs (recall / load_pinned / remember /
-get_state / set_state). `KaguraCloudClient` wraps the `kagura-memory`
+`MemoryClient` is the narrow Protocol the orchestrator depends on — the
+methods the loop needs (load_pinned / recall / recall_detailed / remember /
+feedback / get_state / set_state). `KaguraCloudClient` wraps the `kagura-memory`
 SDK's `KaguraClient` and normalizes its dict responses into the simple
 shapes the loop wants (recall/load_pinned → list[str] of summaries,
 get_state → the stored value or None).
