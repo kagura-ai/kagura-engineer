@@ -1,0 +1,54 @@
+"""Per-run git worktree isolation.
+
+Each `run <issue#>` gets its own worktree named `run-<issue#>`, placed
+OUTSIDE the repo working tree (in a sibling `.kagura-runs/<repo-name>/`
+dir) so it never pollutes the repo's `git status`. The name is
+deterministic so a resumed run finds the same worktree.
+
+Product code uses plain `subprocess.run(["git", ...])` — real git, no
+RTK proxy in the path (RTK only rewrites the agent's Bash-tool git).
+"""
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+
+_TIMEOUT_S = 30
+
+
+class WorktreeError(RuntimeError):
+    """A `git worktree` command failed."""
+
+
+def worktree_root(repo_root: Path) -> Path:
+    """Sibling dir that holds this repo's run worktrees."""
+    return repo_root.parent / ".kagura-runs" / repo_root.name
+
+
+def worktree_path(repo_root: Path, issue: int) -> Path:
+    return worktree_root(repo_root) / f"run-{issue}"
+
+
+def ensure_worktree(repo_root: Path, issue: int, *, base: str = "HEAD") -> Path:
+    """Return the worktree path, creating it off `base` if absent.
+
+    If the path already exists this is a resume: return it untouched.
+    """
+    path = worktree_path(repo_root, issue)
+    if path.exists():
+        return path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    proc = subprocess.run(
+        ["git", "worktree", "add", str(path), base],
+        cwd=repo_root, capture_output=True, text=True, timeout=_TIMEOUT_S,
+    )
+    if proc.returncode != 0:
+        raise WorktreeError(f"git worktree add failed: {proc.stderr.strip()}")
+    return path
+
+
+def remove_worktree(path: Path) -> None:
+    subprocess.run(
+        ["git", "worktree", "remove", "--force", str(path)],
+        capture_output=True, text=True, timeout=_TIMEOUT_S,
+    )
