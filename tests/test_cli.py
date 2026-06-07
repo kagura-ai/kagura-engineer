@@ -174,10 +174,66 @@ def test_setup_invalid_config_clean_error(tmp_path):
     assert "config" in result.output.lower()
 
 
-def test_run_not_implemented(write_cfg):
-    result = runner.invoke(app, ["run", "--config", str(write_cfg)])
-    assert result.exit_code != 0
-    assert "not implemented" in result.stdout.lower()
+def _stub_run_report(status):
+    from kagura_engineer.run.result import PhaseResult, RunReport, RunStatus
+    return RunReport(
+        issue=42,
+        phases=[PhaseResult("guard", status, "x")],
+        pr_url="https://x/pull/1" if status is RunStatus.OK else None,
+        resume_hint=None if status is RunStatus.OK else "re-run",
+    )
+
+
+def test_run_exit_0_on_ok(write_cfg, monkeypatch):
+    from kagura_engineer.run.result import RunStatus
+    monkeypatch.setattr("kagura_engineer.cli.run_idea", lambda *a, **kw: _stub_run_report(RunStatus.OK))
+    result = runner.invoke(app, ["run", "42", "--config", str(write_cfg)])
+    assert result.exit_code == 0
+
+
+def test_run_exit_1_on_fail(write_cfg, monkeypatch):
+    from kagura_engineer.run.result import RunStatus
+    monkeypatch.setattr("kagura_engineer.cli.run_idea", lambda *a, **kw: _stub_run_report(RunStatus.FAIL))
+    result = runner.invoke(app, ["run", "42", "--config", str(write_cfg)])
+    assert result.exit_code == 1
+
+
+def test_run_exit_2_on_blocked(write_cfg, monkeypatch):
+    from kagura_engineer.run.result import RunStatus
+    monkeypatch.setattr("kagura_engineer.cli.run_idea", lambda *a, **kw: _stub_run_report(RunStatus.BLOCKED))
+    result = runner.invoke(app, ["run", "42", "--config", str(write_cfg)])
+    assert result.exit_code == 2
+
+
+def test_run_json_emits_report(write_cfg, monkeypatch):
+    import json
+    from kagura_engineer.run.result import RunStatus
+    monkeypatch.setattr("kagura_engineer.cli.run_idea", lambda *a, **kw: _stub_run_report(RunStatus.OK))
+    result = runner.invoke(app, ["run", "42", "--config", str(write_cfg), "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)
+    assert data["issue"] == 42 and data["status"] == "ok"
+
+
+def test_run_no_remember_propagates(write_cfg, monkeypatch):
+    from kagura_engineer.run.result import RunStatus
+    captured = {}
+
+    def _spy(cfg, issue, **kw):
+        captured.update(kw); captured["issue"] = issue
+        return _stub_run_report(RunStatus.OK)
+
+    monkeypatch.setattr("kagura_engineer.cli.run_idea", _spy)
+    runner.invoke(app, ["run", "7", "--config", str(write_cfg), "--no-remember"])
+    assert captured["issue"] == 7
+    assert captured.get("no_remember") is True
+
+
+def test_run_missing_config_clean_error(tmp_path):
+    missing = tmp_path / "nope.yaml"
+    result = runner.invoke(app, ["run", "42", "--config", str(missing)])
+    assert result.exit_code == 2
+    assert "config" in result.output.lower()
 
 
 def test_doctor_missing_config_clean_error(tmp_path):

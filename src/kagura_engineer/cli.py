@@ -6,6 +6,9 @@ from .config import ConfigError, load_config
 from .doctor.registry import overall_status, run_all
 from .doctor.render import print_table, to_json
 from .doctor.result import Status
+from .run import STATUS_EXIT, run_idea
+from .run.render import print_table as run_print_table
+from .run.render import to_json as run_to_json
 from .setup import STEP_NAMES, build_plan, run_plan
 from .setup.render import print_table as setup_print_table
 from .setup.render import to_json as setup_to_json
@@ -112,15 +115,38 @@ def setup(
 
 
 # ---------------------------------------------------------------------------
-# run (Plan 3 placeholder)
+# run (Plan 3 — memory-grounded agent loop)
 # ---------------------------------------------------------------------------
 
 
 @app.command()
-def run(config: str = _CONFIG_OPT) -> None:
-    """Run the idea-mode pipeline (Plan 3+)."""
-    typer.echo("run: not implemented yet (Plan 3)")
-    raise typer.Exit(code=2)
+def run(
+    issue: int = typer.Argument(..., help="GitHub issue number to drive to a PR"),
+    config: str = _CONFIG_OPT,
+    no_remember: bool = typer.Option(
+        False, "--no-remember", help="skip memory persist (recall still happens)"
+    ),
+    json_out: bool = typer.Option(False, "--json"),
+) -> None:
+    """Drive a GitHub issue to a PR via the memory-grounded agent loop.
+
+    Exit codes: 0 = PR reached · 1 = hard fail · 2 = blocked
+    (guard / gate halt — resumable by re-running).
+    """
+    try:
+        cfg = load_config(config)
+    except ConfigError as exc:
+        typer.echo(f"run: invalid config '{config}': {exc}", err=True)
+        raise typer.Exit(code=2)
+
+    report = run_idea(cfg, issue, no_remember=no_remember)
+
+    if json_out:
+        typer.echo(run_to_json(report))
+    else:
+        run_print_table(report)
+
+    raise typer.Exit(code=STATUS_EXIT[report.status])
 
 
 if __name__ == "__main__":
