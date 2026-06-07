@@ -28,9 +28,11 @@ from ..config import Config
 from ..run.memory import KaguraCloudClient, MemoryClient
 from . import review_pr
 from .fixer import build_fix_prompt, run_fixer
-from .result import ReviewLoopReport, ReviewStatus
+from .result import ReviewLoopReport, ReviewReport, ReviewStatus
 
 _log = logging.getLogger(__name__)
+
+_BLOCKING_SEVERITIES = {"HIGH", "CRITICAL"}
 
 
 def review_fix_loop(
@@ -77,7 +79,10 @@ def review_fix_loop(
                             f"manually, then re-run `kagura-engineer review {target}`",
             )
 
-        prompt = build_fix_prompt(rep.report_path, rep.findings)
+        # Only the genuinely-blocking findings drive the fix; the full report
+        # (report_path) still carries the rest for the actor to read if needed.
+        blocking = [f for f in rep.findings if f.severity.upper() in _BLOCKING_SEVERITIES]
+        prompt = build_fix_prompt(rep.report_path, blocking or rep.findings)
         try:
             fix = run_fixer(root, prompt)
         except OSError as exc:

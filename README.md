@@ -177,6 +177,10 @@ repeating up to `review.max_loops` times. The reviewer stays bounded (it only
 emits findings); the actor does the edits. A review that *couldn't run* (infra
 error) never triggers a fix.
 
+`--fix` commits to (and re-reviews) the **currently checked-out branch**, so
+check out the branch you want fixed before running it — for `review <PR#> --fix`
+that means the PR's head branch.
+
 ---
 
 ## Project layout

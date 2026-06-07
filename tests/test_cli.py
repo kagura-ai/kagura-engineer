@@ -399,3 +399,15 @@ def test_review_fix_json_emits_iterations(monkeypatch, tmp_path):
     data = _json.loads(result.stdout)
     assert data["fixes_attempted"] == 1
     assert len(data["iterations"]) == 2
+
+
+def test_review_fix_fixer_failure_exits_1(monkeypatch, tmp_path):
+    import kagura_engineer.review.loop as lp
+    from kagura_engineer.review.fixer import FixerResult
+    from kagura_engineer.review.result import ReviewStatus
+    _patch_loop_mem(monkeypatch)
+    _loop_review(monkeypatch, [ReviewStatus.BLOCKED])
+    monkeypatch.setattr(lp, "run_fixer", lambda repo, prompt, **kw: FixerResult(1, "", "boom"), raising=True)
+    cfg = _write_cfg_review(tmp_path)
+    result = runner.invoke(app, ["review", "HEAD", "-c", str(cfg), "--fix"])
+    assert result.exit_code == 1
