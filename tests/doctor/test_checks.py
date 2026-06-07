@@ -307,6 +307,20 @@ def test_memory_cloud_ok_with_non_json_body(monkeypatch):
     assert r.status is Status.OK
 
 
+def test_memory_cloud_fail_on_malformed_url(monkeypatch):
+    # A schemeless/garbage memory_cloud_url makes urlopen raise ValueError
+    # ("unknown url type" / "Invalid IPv6 URL"), not URLError. It must be
+    # caught and reported as FAIL — not crash the whole doctor command
+    # (run_all has no per-check isolation).
+    def _boom(*a, **k):
+        raise ValueError("unknown url type: 'foo/health'")
+
+    monkeypatch.setattr(checks.urllib.request, "urlopen", _boom)
+    r = checks.check_memory_cloud("foo")
+    assert r.status is Status.FAIL
+    assert r.fix_hint is not None
+
+
 def test_memory_cloud_warn_on_http_error(monkeypatch):
     def _boom(*a, **k):
         raise urllib.error.HTTPError(

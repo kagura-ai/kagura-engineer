@@ -198,7 +198,12 @@ def check_memory_cloud(base_url: str) -> CheckResult:
             f"reachable but /health returned HTTP {exc.code}",
             "auth/endpoint verified later by setup / Plan 3 recall smoke",
         )
-    except (urllib.error.URLError, OSError) as exc:
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        # ValueError covers a malformed/schemeless memory_cloud_url
+        # ("unknown url type" / "Invalid IPv6 URL"); urlopen raises it
+        # before any network attempt. Match check_ollama, which already
+        # guards ValueError, so a bad URL FAILs cleanly instead of
+        # crashing the whole doctor command (run_all has no isolation).
         return CheckResult(
             "memory-cloud",
             Status.FAIL,

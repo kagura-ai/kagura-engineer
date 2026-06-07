@@ -32,7 +32,14 @@ def load_config(path: str | Path) -> Config:
     if not p.is_file():
         raise ConfigError(f"config not found: {p}")
     try:
-        data = yaml.safe_load(p.read_text()) or {}
+        text = p.read_text()
+    except OSError as exc:
+        # Present but unreadable (mode 000, foreign owner, non-traversable
+        # dir). The docstring promises ConfigError for an unreadable config;
+        # the CLI only catches ConfigError, so a raw OSError would crash.
+        raise ConfigError(f"could not read config {p}: {exc}") from exc
+    try:
+        data = yaml.safe_load(text) or {}
     except yaml.YAMLError as exc:
         raise ConfigError(f"invalid YAML: {exc}") from exc
     try:

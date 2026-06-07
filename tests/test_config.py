@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from kagura_engineer.config import Config, load_config
@@ -60,6 +62,22 @@ def test_context_id_is_required(tmp_path, valid_repo_yaml_text):
 def test_missing_file_raises(tmp_path):
     with pytest.raises(ConfigError):
         load_config(tmp_path / "nope.yaml")
+
+
+def test_unreadable_file_raises_config_error(tmp_path, monkeypatch, valid_repo_yaml_text):
+    # File exists (is_file() True) but read_text() raises PermissionError
+    # (mode 000 / owned by another user). The loader's docstring promises
+    # ConfigError for an unreadable config; a raw OSError would escape the
+    # CLI's `except ConfigError` and crash instead of exiting 2.
+    p = tmp_path / "repo.yaml"
+    p.write_text(valid_repo_yaml_text)
+
+    def _boom(self, *a, **k):
+        raise PermissionError("Permission denied")
+
+    monkeypatch.setattr(Path, "read_text", _boom)
+    with pytest.raises(ConfigError):
+        load_config(p)
 
 
 def test_malformed_yaml_raises_config_error(tmp_path):
