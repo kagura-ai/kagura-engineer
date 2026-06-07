@@ -44,6 +44,17 @@ before the fix.
    verified.
 3. A maintainer reviews and merges. Direct pushes to `main` are disabled.
 
+### Merge policy (matches branch protection)
+
+`main` is protected — your PR must satisfy these rules:
+
+- **Required status checks** (strict): `test (3.11)` and `test (3.12)` must pass,
+  and the branch must be up to date with `main` before merge.
+- **Linear history**: merge commits are not allowed on `main`. Merge via
+  **squash** or **rebase** so history stays linear (`git merge --ff-only`, or
+  GitHub's "Squash and merge" / "Rebase and merge").
+- Force-pushes and branch deletion on `main` are blocked.
+
 ## License of contributions
 
 By submitting a contribution you agree it is licensed under the
