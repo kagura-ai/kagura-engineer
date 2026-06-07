@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import time
 import urllib.error
@@ -212,6 +213,37 @@ def check_memory_cloud(base_url: str) -> CheckResult:
             "check config.memory_cloud_url / network",
         )
     return CheckResult("memory-cloud", Status.OK, f"reachable at {host_only}")
+
+
+def check_local_memory(path: str) -> CheckResult:
+    """Verify the offline SQLite memory backend (Plan 5) can be created and
+    written at `path` — the local counterpart to the cloud reachability probe."""
+    db = Path(path)
+    try:
+        db.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return CheckResult(
+            "memory-local",
+            Status.FAIL,
+            f"cannot create directory {db.parent}: {exc}",
+            "set config.local_memory_path to a writable location",
+        )
+    try:
+        conn = sqlite3.connect(str(db))
+        try:
+            conn.execute("CREATE TABLE IF NOT EXISTS _doctor_probe (x INTEGER)")
+            conn.execute("DROP TABLE _doctor_probe")
+            conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        return CheckResult(
+            "memory-local",
+            Status.FAIL,
+            f"cannot open/write SQLite db at {db}: {exc}",
+            "set config.local_memory_path to a writable location",
+        )
+    return CheckResult("memory-local", Status.OK, f"writable at {db}")
 
 
 def check_gh_issue_driven() -> CheckResult:

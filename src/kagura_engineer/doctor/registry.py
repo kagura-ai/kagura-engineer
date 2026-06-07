@@ -18,7 +18,11 @@ _CHECKS: list[tuple[str, callable]] = [
     ("gh", lambda c: checks.check_gh()),
     ("ollama", lambda c: checks.check_ollama(c.ollama_url, required=c.review.models)),
     ("haiku", lambda c: checks.check_haiku()),
-    ("memory-cloud", lambda c: checks.check_memory_cloud(c.memory_cloud_url)),
+    ("memory", lambda c: (
+        checks.check_local_memory(c.local_memory_path)
+        if c.memory_backend == "local"
+        else checks.check_memory_cloud(c.memory_cloud_url)
+    )),
     ("gh-issue-driven", lambda c: checks.check_gh_issue_driven()),
 ]
 

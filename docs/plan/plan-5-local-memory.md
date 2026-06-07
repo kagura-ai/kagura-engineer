@@ -51,9 +51,12 @@ offline impl with **zero new dependencies** (stdlib `sqlite3`), making grounded
 - Existing CLI tests repatched from `KaguraCloudClient.from_config` to the
   `resolve_memory_client` seam.
 
-## Out of scope (Plan 5+)
+## Plan 5+ follow-ups
 
-- Rich `explore` (Hebbian graph), `feedback` auto-tuning, Sleep consolidation —
-  Cloud-only, deferred.
-- Embedding-based local recall, local pinning, importance/tag query filters.
-- `doctor` check for the local DB path.
+- ✅ **`doctor` check for the memory backend** — done: the doctor "memory" check
+  is now backend-aware (`check_local_memory` probes the SQLite path is
+  creatable/writable when `memory_backend=local`; cloud reachability otherwise).
+- ⏳ Rich `explore` (Hebbian graph), `feedback` auto-tuning, Sleep consolidation
+  — Cloud-SDK + live-integration work; needs a Protocol redesign (recall must
+  return memory ids for feedback/explore). Deferred pending design input.
+- ⏳ Embedding-based local recall, local pinning, importance/tag query filters.

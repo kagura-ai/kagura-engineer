@@ -106,3 +106,26 @@ def test_run_all_isolates_check_exceptions(monkeypatch, valid_config):
     assert all(
         by_name[n].status is Status.OK for n in by_name if n != "git"
     )
+
+
+def test_run_all_uses_local_memory_check_when_backend_local(monkeypatch, valid_config):
+    local_cfg = valid_config.model_copy(update={"memory_backend": "local"})
+    called = {"local": 0, "cloud": 0}
+
+    def _local(*a, **k):
+        called["local"] += 1
+        return CheckResult("memory-local", Status.OK, "ok")
+
+    def _cloud(*a, **k):
+        called["cloud"] += 1
+        return CheckResult("memory-cloud", Status.OK, "ok")
+
+    monkeypatch.setattr(registry.checks, "check_local_memory", _local)
+    monkeypatch.setattr(registry.checks, "check_memory_cloud", _cloud)
+    for name in ("check_git", "check_claude_code", "check_gh", "check_ollama",
+                 "check_haiku", "check_gh_issue_driven"):
+        monkeypatch.setattr(registry.checks, name, lambda *a, **k: CheckResult("x", Status.OK, "ok"))
+
+    results = registry.run_all(local_cfg)
+    assert called["local"] == 1 and called["cloud"] == 0
+    assert any(r.name == "memory-local" for r in results)

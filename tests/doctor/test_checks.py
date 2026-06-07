@@ -352,3 +352,20 @@ def test_check_gh_issue_driven_fail_when_absent(tmp_path, monkeypatch):
     res = checks.check_gh_issue_driven()
     assert res.status is Status.FAIL
     assert res.is_blocking is True  # FAIL ⇒ blocking; run guard refuses to start
+
+
+def test_check_local_memory_ok(tmp_path):
+    from kagura_engineer.doctor import checks
+    from kagura_engineer.doctor.result import Status
+    r = checks.check_local_memory(str(tmp_path / "sub" / "mem.db"))
+    assert r.status is Status.OK
+    assert (tmp_path / "sub").is_dir()
+
+
+def test_check_local_memory_fail_when_parent_unwritable(tmp_path):
+    from kagura_engineer.doctor import checks
+    from kagura_engineer.doctor.result import Status
+    blocker = tmp_path / "afile"
+    blocker.write_text("x")  # a file where a dir is expected → mkdir fails
+    r = checks.check_local_memory(str(blocker / "nope" / "mem.db"))
+    assert r.status is Status.FAIL
