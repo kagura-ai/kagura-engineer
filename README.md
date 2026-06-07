@@ -30,13 +30,31 @@ chain and a `setup` that resolves it.
 
 Requires **Python ≥ 3.11**.
 
+### As a tool (recommended)
+
+This is a proprietary package — it is **not** published to public PyPI. Install
+it straight from the repository (or, later, a private index). `uv` and `pipx`
+pull from git just as they would from an index; `uv` will also fetch a suitable
+Python for you.
+
 ```bash
-pip install -e .            # from a checkout
-# or, with dev extras (pytest):
-pip install -e ".[dev]"
+# uv (also bootstraps Python 3.11 if needed)
+uv tool install git+ssh://git@github.com/kagura-ai/kagura-engineer.git
+
+# or pipx
+pipx install git+ssh://git@github.com/kagura-ai/kagura-engineer.git
 ```
 
-This exposes the `kagura-engineer` CLI (entry point `kagura_engineer.cli:app`).
+Pin a version with a tag: `…kagura-engineer.git@v0.1.0`.
+
+### For development (from a checkout)
+
+```bash
+pip install -e ".[dev]"     # editable install + pytest
+```
+
+Either way, this exposes the `kagura-engineer` CLI (entry point
+`kagura_engineer.cli:app`).
 
 ---
 
