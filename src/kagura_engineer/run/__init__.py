@@ -88,6 +88,13 @@ def run_idea(
     detail = f"{len(grounding)} memories" + (" (resuming)" if resumed else "")
     phases.append(PhaseResult("recall", RunStatus.OK, detail))
 
+    # 1b. cheap resume: a prior run already shipped this issue → no-op (skip
+    # worktree + the two 30-min phases). Keeps `goal` re-runs cheap after a
+    # mid-milestone halt instead of re-launching every already-shipped issue.
+    if resumed and resumed.get("done"):
+        phases.append(PhaseResult("act", RunStatus.OK, "already shipped (resumed)"))
+        return _finish(pr_url=resumed.get("pr_url"))
+
     # 2. worktree.
     try:
         wt = ensure_worktree(root, issue)

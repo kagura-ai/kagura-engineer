@@ -204,3 +204,21 @@ def test_mcp_config_threads_to_invoke_phase(monkeypatch):
     report = run_idea(cfg, 7, memory=_FakeMemory(), repo_root=Path("/repo"))
     assert report.status is RunStatus.OK
     assert seen == ["/tmp/m.json", "/tmp/m.json"]
+
+
+def test_resume_skips_already_shipped_issue(monkeypatch):
+    # a prior run marked this issue done → no-op (no worktree, no act phases)
+    monkeypatch.setattr("kagura_engineer.run.run_all",
+                        lambda cfg: [CheckResult("gh-issue-driven", Status.OK, "x")])
+
+    def _boom(*a, **k):
+        raise AssertionError("must not run worktree/act for an already-shipped issue")
+
+    monkeypatch.setattr("kagura_engineer.run.ensure_worktree", _boom)
+    monkeypatch.setattr("kagura_engineer.run.invoke_phase", _boom)
+    mem = _FakeMemory()
+    mem.state["run:7"] = {"done": True, "pr_url": "https://x/pull/7"}
+    report = run_idea(_cfg(), 7, memory=mem, repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK
+    assert report.pr_url == "https://x/pull/7"
+    assert mem.remembered == []  # no re-persist
