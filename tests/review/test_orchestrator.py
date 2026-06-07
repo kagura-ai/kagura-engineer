@@ -87,7 +87,7 @@ def test_reviewer_not_on_path_is_fail(monkeypatch, tmp_path):
     monkeypatch.setattr(pkg, "run_reviewer", _boom, raising=True)
     rep = review_pr(_cfg(), "HEAD", base="main", repo_root=tmp_path, memory=_FakeMem())
     assert rep.status is ReviewStatus.FAIL
-    assert "could not" in rep.detail.lower() or "not found" in rep.detail.lower()
+    assert "could not launch" in rep.detail.lower()
 
 
 def test_recall_failure_is_fail(monkeypatch, tmp_path):
@@ -106,3 +106,28 @@ def test_exit_map():
     assert REVIEW_STATUS_EXIT[ReviewStatus.OK] == 0
     assert REVIEW_STATUS_EXIT[ReviewStatus.FAIL] == 1
     assert REVIEW_STATUS_EXIT[ReviewStatus.BLOCKED] == 2
+
+
+def test_parsed_but_no_verdict_is_fail(monkeypatch, tmp_path):
+    # valid JSON envelope but no verdict = reviewer malfunction, not a real block
+    _patch_reviewer(monkeypatch, ReviewerResult(0, "", "", ReviewEnvelope(parsed=True, verdict=None)))
+    rep = review_pr(_cfg(), "HEAD", base="main", repo_root=tmp_path, memory=_FakeMem())
+    assert rep.status is ReviewStatus.FAIL
+
+
+def test_report_path_persists_after_return(monkeypatch, tmp_path):
+    # report_path must point at a file that still exists after review_pr returns
+    # (i.e. NOT inside the deleted temp dir)
+    import kagura_engineer.review as pkg
+
+    def _fake(**kw):
+        kw["out"].write_text('{"schema_version":1,"verdict":"green","findings":[]}')
+        return ReviewerResult(0, "", "", ReviewEnvelope(parsed=True, verdict="green"))
+
+    monkeypatch.setattr(pkg, "resolve_head", lambda t: t, raising=True)
+    monkeypatch.setattr(pkg, "run_reviewer", _fake, raising=True)
+    rep = review_pr(_cfg(), "HEAD", base="main", repo_root=tmp_path, memory=_FakeMem())
+    assert rep.status is ReviewStatus.OK
+    assert rep.report_path is not None
+    from pathlib import Path as _P
+    assert _P(rep.report_path).is_file()

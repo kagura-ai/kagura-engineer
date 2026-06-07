@@ -35,7 +35,7 @@ REVIEW_STATUS_EXIT: dict[ReviewStatus, int] = {
     ReviewStatus.BLOCKED: 2,
 }
 
-_INFRA_RETURNCODES = {2, 3}
+_INFRA_RETURNCODES = {2, 3}  # reviewer: 2=git/config error, 3=backend failure (Plan 4 contract)
 
 
 def review_pr(
@@ -70,11 +70,20 @@ def review_pr(
                        detail=f"memory recall failed: {type(exc).__name__}: {exc}")
 
     # 2. run reviewer (separate process). OSError = not on PATH; timeout and
-    # infra exits are reported by ReviewerResult.
+    # infra exits are reported by ReviewerResult. The raw JSON report is
+    # persisted under the repo (.kagura/) so a human can read the full findings
+    # (rationale/suggestion) the display-slice Finding drops; the untrusted
+    # grounding file is ephemeral (temp dir — only needed during the call).
+    out = root / ".kagura" / "review.json"
+    try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        _log.exception("review could not create report dir")
+        return _finish(status=ReviewStatus.FAIL,
+                       detail=f"could not create report dir {out.parent}: {exc}")
+    model = cfg.review.models[0] if cfg.review.models else None
     with tempfile.TemporaryDirectory() as td:
         ctx = build_context_file(grounding, Path(td) / "grounding.md")
-        out = Path(td) / "review.json"
-        model = cfg.review.models[0] if cfg.review.models else None
         try:
             res = run_reviewer(
                 base=base, head=head, repo=root, out=out,
@@ -84,8 +93,8 @@ def review_pr(
             _log.exception("review could not launch reviewer")
             return _finish(status=ReviewStatus.FAIL,
                            detail=f"could not launch kagura-code-reviewer: {exc}")
-        report_path = str(out) if out.is_file() else None
-        env = res.envelope
+    report_path = str(out) if out.is_file() else None
+    env = res.envelope
 
     # 3. interpret.
     if res.no_changes:
@@ -93,7 +102,7 @@ def review_pr(
                        detail="no changes to review")
     if res.timed_out:
         return _finish(status=ReviewStatus.FAIL, detail="reviewer timed out")
-    if res.returncode in _INFRA_RETURNCODES or not env.parsed:
+    if res.returncode in _INFRA_RETURNCODES or not env.parsed or env.verdict is None:
         tail = (res.stderr or "").strip()[-200:]
         return _finish(status=ReviewStatus.FAIL,
                        detail=f"reviewer could not complete (exit {res.returncode}): {tail}")
