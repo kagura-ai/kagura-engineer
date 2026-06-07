@@ -26,6 +26,7 @@ def worktree_root(repo_root: Path) -> Path:
 
 
 def worktree_path(repo_root: Path, issue: int) -> Path:
+    """Full path to the worktree for `issue` under this repo's run root."""
     return worktree_root(repo_root) / f"run-{issue}"
 
 
@@ -38,17 +39,26 @@ def ensure_worktree(repo_root: Path, issue: int, *, base: str = "HEAD") -> Path:
     if path.exists():
         return path
     path.parent.mkdir(parents=True, exist_ok=True)
-    proc = subprocess.run(
-        ["git", "worktree", "add", str(path), base],
-        cwd=repo_root, capture_output=True, text=True, timeout=_TIMEOUT_S,
-    )
+    try:
+        proc = subprocess.run(
+            ["git", "worktree", "add", str(path), base],
+            cwd=repo_root, capture_output=True, text=True, timeout=_TIMEOUT_S,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise WorktreeError(f"git worktree add failed: {exc}") from exc
     if proc.returncode != 0:
         raise WorktreeError(f"git worktree add failed: {proc.stderr.strip()}")
     return path
 
 
-def remove_worktree(path: Path) -> None:
+def remove_worktree(path: Path, *, repo_root: Path | None = None) -> None:
+    """Best-effort cleanup of a run worktree.
+
+    Errors are intentionally suppressed — a failed removal must not abort
+    the caller. Pass `repo_root` as cwd so the command works even if the
+    process CWD is inside the worktree being removed (git refuses that).
+    """
     subprocess.run(
         ["git", "worktree", "remove", "--force", str(path)],
-        capture_output=True, text=True, timeout=_TIMEOUT_S,
+        cwd=repo_root, capture_output=True, text=True, timeout=_TIMEOUT_S,
     )

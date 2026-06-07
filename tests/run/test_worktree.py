@@ -54,11 +54,29 @@ def test_ensure_worktree_raises_on_git_failure(tmp_path, monkeypatch):
         worktree.ensure_worktree(repo, 9)
 
 
+def test_ensure_worktree_wraps_timeout_as_worktree_error(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def _timeout(cmd, **kw):
+        raise subprocess.TimeoutExpired(cmd, 30)
+
+    monkeypatch.setattr(worktree.subprocess, "run", _timeout)
+    with pytest.raises(worktree.WorktreeError):
+        worktree.ensure_worktree(repo, 9)
+
+
 def test_remove_worktree_calls_git_remove_force(tmp_path, monkeypatch):
     cmds = []
-    monkeypatch.setattr(
-        worktree.subprocess, "run",
-        lambda cmd, **kw: cmds.append(cmd) or subprocess.CompletedProcess(cmd, 0, "", ""),
-    )
-    worktree.remove_worktree(Path("/tmp/run-1"))
-    assert cmds[0] == ["git", "worktree", "remove", "--force", "/tmp/run-1"]
+    kwargs = []
+
+    def _fake_run(cmd, **kw):
+        cmds.append(cmd)
+        kwargs.append(kw)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(worktree.subprocess, "run", _fake_run)
+    target = tmp_path / "run-1"
+    worktree.remove_worktree(target, repo_root=tmp_path)
+    assert cmds[0] == ["git", "worktree", "remove", "--force", str(target)]
+    assert kwargs[0]["cwd"] == tmp_path
