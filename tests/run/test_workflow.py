@@ -96,3 +96,24 @@ def test_invoke_phase_timeout_decodes_bytes_output(monkeypatch, tmp_path):
     assert inv.timed_out is True
     assert isinstance(inv.stdout, str) and inv.stdout == "partial\n"
     assert isinstance(inv.stderr, str) and inv.stderr == "warn"
+
+
+def test_build_prompt_unattended_adds_instruction():
+    p = workflow.build_prompt("start", 1, [], unattended=True)
+    assert "UNATTENDED" in p
+
+
+def test_build_prompt_default_has_no_unattended():
+    assert "UNATTENDED" not in workflow.build_prompt("start", 1, [])
+
+
+def test_invoke_phase_forwards_unattended_into_prompt(monkeypatch, tmp_path):
+    captured = {}
+
+    def _run(cmd, **kw):
+        captured["prompt"] = cmd[cmd.index("-p") + 1]
+        return subprocess.CompletedProcess(cmd, 0, "KAGURA_VERDICT=green\n", "")
+
+    monkeypatch.setattr(workflow.subprocess, "run", _run)
+    workflow.invoke_phase("ship", 2, tmp_path, [], unattended=True)
+    assert "UNATTENDED" in captured["prompt"]

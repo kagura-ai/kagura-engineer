@@ -169,3 +169,20 @@ def test_phase_launch_oserror_is_fail(monkeypatch):
     report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
     assert report.status is RunStatus.FAIL
     assert report.phases[-1].name == "start"
+
+
+def test_unattended_threads_to_invoke_phase(monkeypatch):
+    seen = []
+    monkeypatch.setattr("kagura_engineer.run.run_all",
+                        lambda cfg: [CheckResult("gh-issue-driven", Status.OK, "x")])
+    monkeypatch.setattr("kagura_engineer.run.ensure_worktree",
+                        lambda root, issue, base="HEAD": Path(f"/wt/run-{issue}"))
+
+    def _invoke(phase, issue, worktree, grounding, *, unattended=False, **kw):
+        seen.append(unattended)
+        return PhaseInvocation(phase, 0, "", "", "green", "https://x/pull/1")
+
+    monkeypatch.setattr("kagura_engineer.run.invoke_phase", _invoke)
+    report = run_idea(_cfg(), 7, unattended=True, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK
+    assert seen == [True, True]  # start + ship both threaded

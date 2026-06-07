@@ -33,6 +33,7 @@ def run_milestone(
     milestone: str,
     *,
     no_remember: bool = False,
+    unattended: bool = False,
     memory: MemoryClient | None = None,
     repo_root: Path | None = None,
 ) -> GoalReport:
@@ -53,7 +54,8 @@ def run_milestone(
     mem = memory if memory is not None else resolve_memory_client(cfg)
     reports = []
     for issue in issues:
-        rep = run_idea(cfg, issue, no_remember=no_remember, memory=mem, repo_root=repo_root)
+        rep = run_idea(cfg, issue, no_remember=no_remember, unattended=unattended,
+                       memory=mem, repo_root=repo_root)
         reports.append(rep)
         if rep.status is not RunStatus.OK:
             # Halt the milestone at the first issue needing a human; resumable.

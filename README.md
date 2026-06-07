@@ -25,7 +25,7 @@ chain and a `setup` that resolves it.
 | **Plan 5** | `LocalMemoryClient` — offline SQLite memory backend | ✅ done |
 | Plan 5+ | rich graph/feedback/Sleep usage, memory auto-store, worktree runs | 📋 planned |
 
-`doctor`, `setup`, `run`, `review`, and `goal` are runnable now (346 tests green).
+`doctor`, `setup`, `run`, `review`, and `goal` are runnable now (353 tests green).
 
 ---
 
@@ -153,6 +153,7 @@ and opens a PR — persisting a savepoint to Memory Cloud.
 ```
 kagura-engineer run 42                 # drive issue #42 to a PR
 kagura-engineer run 42 --no-remember   # recall but don't persist
+kagura-engineer run 42 --unattended    # don't pause on green/yellow (red still halts)
 kagura-engineer run 42 --json
 ```
 
@@ -199,6 +200,7 @@ issues resume cleanly).
 
 ```
 kagura-engineer goal v0.3              # drive milestone "v0.3" to PRs
+kagura-engineer goal v0.3 --unattended # don't pause on green/yellow (red still halts)
 kagura-engineer goal v0.3 --json
 ```
 

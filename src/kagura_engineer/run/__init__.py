@@ -51,6 +51,7 @@ def run_idea(
     issue: int,
     *,
     no_remember: bool = False,
+    unattended: bool = False,
     memory: MemoryClient | None = None,
     repo_root: Path | None = None,
 ) -> RunReport:
@@ -100,7 +101,7 @@ def run_idea(
     pr_url = None
     for phase in _PHASES:
         try:
-            inv = invoke_phase(phase, issue, wt, grounding)
+            inv = invoke_phase(phase, issue, wt, grounding, unattended=unattended)
         except OSError as exc:
             _log.exception("run %s phase failed to launch claude", phase)
             phases.append(PhaseResult(phase, RunStatus.FAIL, f"failed to launch claude: {exc}"))

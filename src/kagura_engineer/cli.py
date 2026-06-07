@@ -135,6 +135,11 @@ def run(
     no_remember: bool = typer.Option(
         False, "--no-remember", help="skip memory persist (recall still happens)"
     ),
+    unattended: bool = typer.Option(
+        False, "--unattended",
+        help="dial HITL down: delegated phases proceed on green/yellow without "
+             "asking (red/unknown still halt)",
+    ),
     json_out: bool = typer.Option(False, "--json"),
 ) -> None:
     """Drive a GitHub issue to a PR via the memory-grounded agent loop.
@@ -148,7 +153,7 @@ def run(
         typer.echo(f"run: invalid config '{config}': {exc}", err=True)
         raise typer.Exit(code=2)
 
-    report = run_idea(cfg, issue, no_remember=no_remember)
+    report = run_idea(cfg, issue, no_remember=no_remember, unattended=unattended)
 
     if json_out:
         typer.echo(run_to_json(report))
@@ -217,6 +222,11 @@ def goal(
     no_remember: bool = typer.Option(
         False, "--no-remember", help="skip memory persist (recall still happens)"
     ),
+    unattended: bool = typer.Option(
+        False, "--unattended",
+        help="dial HITL down across issues: proceed on green/yellow without "
+             "asking (red/unknown still halt)",
+    ),
     json_out: bool = typer.Option(False, "--json"),
 ) -> None:
     """Drive every open issue in a milestone to a PR via the run loop.
@@ -231,7 +241,7 @@ def goal(
         typer.echo(f"goal: invalid config '{config}': {exc}", err=True)
         raise typer.Exit(code=2)
 
-    report = run_milestone(cfg, milestone, no_remember=no_remember)
+    report = run_milestone(cfg, milestone, no_remember=no_remember, unattended=unattended)
 
     if json_out:
         typer.echo(goal_to_json(report))

@@ -454,3 +454,29 @@ def test_goal_json_emits_status(monkeypatch, tmp_path):
     result = runner.invoke(app, ["goal", "v0.3", "-c", str(cfg), "--json"])
     assert result.exit_code == 0
     assert _json.loads(result.stdout)["milestone"] == "v0.3"
+
+
+def test_run_unattended_flag_threads(monkeypatch, tmp_path):
+    import kagura_engineer.cli as cli
+    from kagura_engineer.run.result import RunReport
+    seen = {}
+    monkeypatch.setattr(cli, "run_idea",
+                        lambda cfg, issue, **kw: (seen.update(kw) or RunReport(issue=issue)), raising=True)
+    cfg = _write_cfg_review(tmp_path)
+    r = runner.invoke(app, ["run", "5", "-c", str(cfg), "--unattended"])
+    assert r.exit_code == 0
+    assert seen.get("unattended") is True
+
+
+def test_goal_unattended_flag_threads(monkeypatch, tmp_path):
+    import kagura_engineer.cli as cli
+    from kagura_engineer.goal.result import GoalReport
+    from kagura_engineer.run.result import RunStatus
+    seen = {}
+    monkeypatch.setattr(cli, "run_milestone",
+                        lambda cfg, m, **kw: (seen.update(kw) or GoalReport(milestone=m, status=RunStatus.OK)),
+                        raising=True)
+    cfg = _write_cfg_review(tmp_path)
+    r = runner.invoke(app, ["goal", "v0.3", "-c", str(cfg), "--unattended"])
+    assert r.exit_code == 0
+    assert seen.get("unattended") is True

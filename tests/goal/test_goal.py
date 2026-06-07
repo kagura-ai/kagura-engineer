@@ -95,3 +95,17 @@ def test_shared_memory_client_across_issues(monkeypatch):
     monkeypatch.setattr(g, "run_idea", _fake_run_idea, raising=True)
     run_milestone(_cfg(), "m")
     assert seen == [sentinel, sentinel]  # resolved once, reused
+
+
+def test_unattended_threads_to_run_idea(monkeypatch):
+    seen = []
+    monkeypatch.setattr(g, "list_milestone_issues", lambda m: [1], raising=True)
+    monkeypatch.setattr(g, "resolve_memory_client", lambda cfg: _Mem(), raising=True)
+
+    def _fake_run_idea(cfg, issue, *, unattended=False, **kw):
+        seen.append(unattended)
+        return _rr(issue, RunStatus.OK)
+
+    monkeypatch.setattr(g, "run_idea", _fake_run_idea, raising=True)
+    run_milestone(_cfg(), "m", unattended=True)
+    assert seen == [True]
