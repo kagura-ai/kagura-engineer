@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 
 from ..config import Config
-from ..run.memory import KaguraCloudClient, MemoryClient
+from ..run.memory import MemoryClient, resolve_memory_client
 from . import review_pr
 from .fixer import build_fix_prompt, run_fixer
 from .result import ReviewLoopReport, ReviewReport, ReviewStatus
@@ -44,7 +44,7 @@ def review_fix_loop(
     memory: MemoryClient | None = None,
     repo_root: Path | None = None,
 ) -> ReviewLoopReport:
-    mem = memory if memory is not None else KaguraCloudClient.from_config(cfg)
+    mem = memory if memory is not None else resolve_memory_client(cfg)
     root = repo_root if repo_root is not None else Path.cwd()
     budget = cfg.review.max_loops if max_loops is None else max_loops
     started = time.monotonic()

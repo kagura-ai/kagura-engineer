@@ -26,7 +26,7 @@ from pathlib import Path
 from ..config import Config
 from ..doctor.registry import run_all
 from .gate import evaluate
-from .memory import KaguraCloudClient, MemoryClient
+from .memory import MemoryClient, resolve_memory_client
 from .result import PhaseResult, RunReport, RunStatus
 from .worktree import WorktreeError, ensure_worktree
 from .workflow import invoke_phase
@@ -54,7 +54,7 @@ def run_idea(
     memory: MemoryClient | None = None,
     repo_root: Path | None = None,
 ) -> RunReport:
-    mem = memory if memory is not None else KaguraCloudClient.from_config(cfg)
+    mem = memory if memory is not None else resolve_memory_client(cfg)
     root = repo_root if repo_root is not None else Path.cwd()
     started = time.monotonic()
     phases: list[PhaseResult] = []

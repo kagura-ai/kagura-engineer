@@ -22,7 +22,7 @@ from pathlib import Path
 
 from ..config import Config
 from ..run.gate import evaluate
-from ..run.memory import KaguraCloudClient, MemoryClient
+from ..run.memory import MemoryClient, resolve_memory_client
 from .context import build_context_file
 from .result import ReviewReport, ReviewStatus
 from .reviewer import resolve_head, run_reviewer
@@ -46,7 +46,7 @@ def review_pr(
     memory: MemoryClient | None = None,
     repo_root: Path | None = None,
 ) -> ReviewReport:
-    mem = memory if memory is not None else KaguraCloudClient.from_config(cfg)
+    mem = memory if memory is not None else resolve_memory_client(cfg)
     root = repo_root if repo_root is not None else Path.cwd()
     started = time.monotonic()
     head = resolve_head(target)

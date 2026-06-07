@@ -78,3 +78,15 @@ class KaguraCloudClient:
 
     def set_state(self, context_id: str, key: str, value: dict) -> None:
         self._sdk.set_state(context_id, key, value)
+
+
+def resolve_memory_client(cfg: Config) -> MemoryClient:
+    """Pick the memory backend from config: ``local`` → the offline SQLite
+    ``LocalMemoryClient`` (no network, no API key); anything else → the Kagura
+    Memory Cloud SDK client. The orchestrators call this for their default
+    (non-injected) memory client so the backend is one config switch away."""
+    if cfg.memory_backend == "local":
+        from .local_memory import LocalMemoryClient
+
+        return LocalMemoryClient(cfg.local_memory_path)
+    return KaguraCloudClient.from_config(cfg)

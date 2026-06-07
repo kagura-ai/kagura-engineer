@@ -22,9 +22,10 @@ chain and a `setup` that resolves it.
 | **Plan 3** | `run` — memory-grounded agent loop (issue→PR) | ✅ done |
 | **Plan 4** | `review` — launch the reviewer, gate on its JSON verdict | ✅ done |
 | **Plan 4b** | `review --fix` — auto-review/fix loop | ✅ done |
-| Plan 5+ | local memory (SQLite), memory auto-store, worktree runs | 📋 planned |
+| **Plan 5** | `LocalMemoryClient` — offline SQLite memory backend | ✅ done |
+| Plan 5+ | rich graph/feedback/Sleep usage, memory auto-store, worktree runs | 📋 planned |
 
-`doctor`, `setup`, `run`, and `review` are runnable now (307 tests green).
+`doctor`, `setup`, `run`, and `review` are runnable now (322 tests green).
 
 ---
 
@@ -69,6 +70,8 @@ memory_cloud_url: https://memory.kagura-ai.com    # required
 workspace_id: ws_xxxxxxxx                          # required — Memory Cloud scope
 context_id: 00000000-0000-0000-0000-000000000000  # required — context within the workspace
 ollama_url: http://localhost:11434                 # optional (default shown)
+memory_backend: cloud                              # optional: cloud | local (default: cloud)
+local_memory_path: .kagura/memory.db               # optional (used only when backend=local)
 review:
   models: [qwen2.5-coder:7b, haiku]               # optional (default: [])
   max_loops: 3                                      # optional (default: 3)
@@ -77,6 +80,12 @@ review:
 `workspace_id → context_id → memory` is the Memory Cloud filter hierarchy.
 A missing required field, unparseable YAML, or an unreadable file fails with a
 clean error and **exit code 2**.
+
+**Memory backend (Plan 5).** `memory_backend: local` switches `run`/`review`
+grounding to an offline SQLite store (`local_memory_path`, stdlib `sqlite3` —
+no API key, no network). It implements the same client Protocol as the Kagura
+Memory Cloud backend; offline recall is a keyword-overlap match (no embeddings),
+and pinning stays a Cloud-only feature. Use it to run fully offline or in CI.
 
 ---
 

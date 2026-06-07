@@ -287,7 +287,7 @@ def test_review_green_exits_0(monkeypatch, tmp_path):
     class _Mem:
         def load_pinned(self, c): return []
         def recall(self, c, q, *, k=5): return []
-    monkeypatch.setattr(pkg.KaguraCloudClient, "from_config", classmethod(lambda cls, cfg: _Mem()))
+    monkeypatch.setattr(pkg, "resolve_memory_client", lambda cfg: _Mem(), raising=True)
 
     cfg = _write_cfg_review(tmp_path)
     result = runner.invoke(app, ["review", "HEAD", "-c", str(cfg)])
@@ -303,7 +303,7 @@ def test_review_red_exits_2(monkeypatch, tmp_path):
     class _Mem:
         def load_pinned(self, c): return []
         def recall(self, c, q, *, k=5): return []
-    monkeypatch.setattr(pkg.KaguraCloudClient, "from_config", classmethod(lambda cls, cfg: _Mem()))
+    monkeypatch.setattr(pkg, "resolve_memory_client", lambda cfg: _Mem(), raising=True)
 
     cfg = _write_cfg_review(tmp_path)
     result = runner.invoke(app, ["review", "HEAD", "-c", str(cfg)])
@@ -328,7 +328,7 @@ def test_review_json_flag_emits_json(monkeypatch, tmp_path):
     class _Mem:
         def load_pinned(self, c): return []
         def recall(self, c, q, *, k=5): return []
-    monkeypatch.setattr(pkg.KaguraCloudClient, "from_config", classmethod(lambda cls, cfg: _Mem()))
+    monkeypatch.setattr(pkg, "resolve_memory_client", lambda cfg: _Mem(), raising=True)
 
     cfg = _write_cfg_review(tmp_path)
     result = runner.invoke(app, ["review", "HEAD", "-c", str(cfg), "--json"])
@@ -345,8 +345,7 @@ def _patch_loop_mem(monkeypatch):
     class _Mem:
         def load_pinned(self, c): return []
         def recall(self, c, q, *, k=5): return []
-    monkeypatch.setattr(lp.KaguraCloudClient, "from_config",
-                        classmethod(lambda cls, cfg: _Mem()), raising=True)
+    monkeypatch.setattr(lp, "resolve_memory_client", lambda cfg: _Mem(), raising=True)
 
 
 def _loop_review(monkeypatch, statuses):
