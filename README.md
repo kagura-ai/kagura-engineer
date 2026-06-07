@@ -25,7 +25,7 @@ chain and a `setup` that resolves it.
 | **Plan 5** | `LocalMemoryClient` — offline SQLite memory backend | ✅ done |
 | Plan 5+ | rich graph/feedback/Sleep usage, memory auto-store, worktree runs | 📋 planned |
 
-`doctor`, `setup`, `run`, and `review` are runnable now (322 tests green).
+`doctor`, `setup`, `run`, `review`, and `goal` are runnable now (346 tests green).
 
 ---
 
@@ -189,6 +189,21 @@ error) never triggers a fix.
 `--fix` commits to (and re-reviews) the **currently checked-out branch**, so
 check out the branch you want fixed before running it — for `review <PR#> --fix`
 that means the PR's head branch.
+
+### `kagura-engineer goal`
+
+Drive a whole **milestone** to PRs: enumerate its open issues (via `gh`) and run
+the `run` loop over each, in order. It auto-continues while issues ship and
+halts at the first blocked/failed issue (resumable by re-running — already-shipped
+issues resume cleanly).
+
+```
+kagura-engineer goal v0.3              # drive milestone "v0.3" to PRs
+kagura-engineer goal v0.3 --json
+```
+
+Exit codes: `0` all issues shipped · `1` hard fail · `2` blocked (an issue's
+gate halted — resolve it, then re-run).
 
 ---
 

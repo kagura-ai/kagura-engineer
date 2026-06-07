@@ -410,3 +410,47 @@ def test_review_fix_fixer_failure_exits_1(monkeypatch, tmp_path):
     cfg = _write_cfg_review(tmp_path)
     result = runner.invoke(app, ["review", "HEAD", "-c", str(cfg), "--fix"])
     assert result.exit_code == 1
+
+
+# --- goal: milestone driver ------------------------------------------------
+
+
+def test_goal_all_shipped_exits_0(monkeypatch, tmp_path):
+    import kagura_engineer.cli as cli
+    from kagura_engineer.goal.result import GoalReport
+    from kagura_engineer.run.result import RunStatus
+    monkeypatch.setattr(cli, "run_milestone",
+                        lambda cfg, m, **kw: GoalReport(milestone=m, status=RunStatus.OK), raising=True)
+    cfg = _write_cfg_review(tmp_path)
+    result = runner.invoke(app, ["goal", "v0.3", "-c", str(cfg)])
+    assert result.exit_code == 0
+
+
+def test_goal_blocked_exits_2(monkeypatch, tmp_path):
+    import kagura_engineer.cli as cli
+    from kagura_engineer.goal.result import GoalReport
+    from kagura_engineer.run.result import RunStatus
+    monkeypatch.setattr(cli, "run_milestone",
+                        lambda cfg, m, **kw: GoalReport(milestone=m, status=RunStatus.BLOCKED,
+                                                        resume_hint="x"), raising=True)
+    cfg = _write_cfg_review(tmp_path)
+    result = runner.invoke(app, ["goal", "v0.3", "-c", str(cfg)])
+    assert result.exit_code == 2
+
+
+def test_goal_bad_config_exits_2(tmp_path):
+    result = runner.invoke(app, ["goal", "v0.3", "-c", str(tmp_path / "nope.yaml")])
+    assert result.exit_code == 2
+
+
+def test_goal_json_emits_status(monkeypatch, tmp_path):
+    import json as _json
+    import kagura_engineer.cli as cli
+    from kagura_engineer.goal.result import GoalReport
+    from kagura_engineer.run.result import RunStatus
+    monkeypatch.setattr(cli, "run_milestone",
+                        lambda cfg, m, **kw: GoalReport(milestone=m, status=RunStatus.OK), raising=True)
+    cfg = _write_cfg_review(tmp_path)
+    result = runner.invoke(app, ["goal", "v0.3", "-c", str(cfg), "--json"])
+    assert result.exit_code == 0
+    assert _json.loads(result.stdout)["milestone"] == "v0.3"
