@@ -65,6 +65,34 @@ def install_command(platform: PlatformInfo) -> list[str] | None:
     return None
 
 
+def model_present(req: str, have: set[str]) -> bool:
+    """Is required model `req` satisfied by the daemon's `have` set?
+
+    Symmetric base-name match: a tagged config (`foo:7b`) matches an
+    untagged daemon entry (`foo`) and vice versa. Both sides are
+    normalized to the part before the first ':' before comparing.
+
+    Shared with doctor.check_ollama so the two never disagree on whether
+    a model is present — otherwise doctor reports OK while setup re-pulls
+    the same model under a different tag.
+    """
+    if req in have:
+        return True
+    req_base = req.split(":", 1)[0]
+    return any(h.split(":", 1)[0] == req_base for h in have)
+
+
+def _names_from_tags(data: dict) -> set[str]:
+    """Build the set of model names from a /api/tags body, skipping
+    entries that are not dicts or lack a (truthy) `name` — those would
+    otherwise inject None into the set and break matching/counts."""
+    return {
+        name
+        for m in (data.get("models") or [])
+        if isinstance(m, dict) and (name := m.get("name"))
+    }
+
+
 def _probe_daemon(ollama_url: str) -> dict:
     """Hit /api/tags; return the parsed JSON body. Caller catches
     the exceptions that mean 'daemon is not up'."""
@@ -237,12 +265,8 @@ def pull_ollama_models(
             duration_s=time.monotonic() - started,
         )
 
-    have = {
-        m.get("name")
-        for m in (data.get("models") or [])
-        if isinstance(m, dict)
-    }
-    missing = [m for m in required if m not in have]
+    have = _names_from_tags(data)
+    missing = [m for m in required if not model_present(m, have)]
     if not missing:
         return StepResult(
             name, StepStatus.OK,

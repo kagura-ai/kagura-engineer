@@ -171,6 +171,30 @@ def test_ollama_tagged_config_matches_untagged_daemon_model(monkeypatch):
     assert r.status is Status.OK
 
 
+def test_ollama_does_not_crash_when_model_entry_lacks_name(monkeypatch):
+    # A dict entry without "name" (e.g. Ollama renaming the key to "model",
+    # or a malformed/older endpoint) must NOT put None into `have` and then
+    # crash _model_present via None.split(). It should degrade to WARN.
+    payload = {"models": [{"model": "llama3:8b"}]}
+    monkeypatch.setattr(
+        checks.urllib.request, "urlopen", lambda *a, **k: _FakeResp(payload)
+    )
+    r = checks.check_ollama("http://localhost:11434", required=["llama3"])
+    assert r.status is Status.WARN
+    assert "llama3" in r.detail
+
+
+def test_ollama_count_excludes_nameless_entries(monkeypatch):
+    # A model dict missing "name" must not inflate the "N models available" count.
+    payload = {"models": [{"name": "llama3"}, {"digest": "abc"}]}
+    monkeypatch.setattr(
+        checks.urllib.request, "urlopen", lambda *a, **k: _FakeResp(payload)
+    )
+    r = checks.check_ollama("http://localhost:11434", required=[])
+    assert r.status is Status.OK
+    assert "1 models available" in r.detail
+
+
 def test_ollama_warn_when_models_field_is_null(monkeypatch):
     # Daemon (or a proxy) returns {"models": null}. Must not raise TypeError.
     payload = {"models": None}

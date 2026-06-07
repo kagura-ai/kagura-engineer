@@ -9,6 +9,7 @@ import urllib.error
 import urllib.request
 
 from ..setup.auth import AuthMethod, resolve_anthropic_auth
+from ..setup.ollama import model_present
 from .result import CheckResult, Status
 
 _TIMEOUT = 5
@@ -105,16 +106,6 @@ def _http_reach(url: str) -> None:
         resp.read()  # body discarded; open succeeding is sufficient proof of reachability
 
 
-def _model_present(req: str, have: set[str]) -> bool:
-    if req in have:
-        return True
-    # Symmetric base-name match: a tagged config (`foo:7b`) matches an
-    # untagged daemon entry (`foo`) and vice versa. Both sides are normalized
-    # to the part before the first ':' before comparing.
-    req_base = req.split(":", 1)[0]
-    return any(h.split(":", 1)[0] == req_base for h in have)
-
-
 def check_ollama(base_url: str, required: list[str]) -> CheckResult:
     try:
         data = _http_json(f"{base_url.rstrip('/')}/api/tags")
@@ -129,13 +120,15 @@ def check_ollama(base_url: str, required: list[str]) -> CheckResult:
             "unexpected /api/tags response shape",
             "verify the ollama_url points at an Ollama daemon",
         )
-    models_raw = data.get("models")
+    # Skip entries that aren't dicts or lack a (truthy) `name`; otherwise a
+    # malformed entry injects None into `have`, inflating the count and
+    # crashing the base-name match via None.split().
     have = {
-        m.get("name")
-        for m in (models_raw or [])
-        if isinstance(m, dict)
+        name
+        for m in (data.get("models") or [])
+        if isinstance(m, dict) and (name := m.get("name"))
     }
-    missing = [m for m in required if not _model_present(m, have)]
+    missing = [m for m in required if not model_present(m, have)]
     if missing:
         return CheckResult(
             "ollama",

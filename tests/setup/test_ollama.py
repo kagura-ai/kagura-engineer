@@ -196,6 +196,28 @@ def test_pull_pulls_missing_models(monkeypatch):
     assert r.status is StepStatus.OK
 
 
+def test_pull_untagged_config_matches_tagged_daemon_model(monkeypatch):
+    # setup must agree with doctor's check_ollama: an untagged required name
+    # (`qwen2.5-coder`) matches a tagged daemon entry (`qwen2.5-coder:7b`),
+    # so no spurious re-pull of an already-present model happens.
+    monkeypatch.setattr(ollama_setup.shutil, "which", lambda n: "/usr/bin/ollama" if n == "ollama" else None)
+    monkeypatch.setattr(
+        ollama_setup.urllib.request, "urlopen",
+        _make_urlopen({"models": [{"name": "qwen2.5-coder:7b"}]}),
+    )
+
+    def _must_not_run(*a, **k):
+        raise AssertionError("must not pull a model doctor considers present")
+
+    monkeypatch.setattr(ollama_setup.subprocess, "run", _must_not_run)
+    r = pull_ollama_models(
+        _LINUX_APT, "http://localhost:11434",
+        required=["qwen2.5-coder"],
+        no_input=False, dry_run=False,
+    )
+    assert r.status is StepStatus.OK
+
+
 def test_pull_no_input_pulls_silently(monkeypatch):
     # In no-input mode, missing models are still pulled (the daemon
     # is reachable; pulling is non-interactive).
