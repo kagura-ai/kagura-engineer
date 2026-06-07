@@ -17,16 +17,10 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..proc import as_text
 from .result import Finding
 
 _FIX_TIMEOUT_S = 1800  # 30 min — match run's phase timeout
-
-
-def _as_text(value: bytes | str | None) -> str:
-    """TimeoutExpired carries raw bytes even under text=True; normalize to str."""
-    if isinstance(value, bytes):
-        return value.decode(errors="replace")
-    return value or ""
 
 
 @dataclass(frozen=True)
@@ -72,5 +66,5 @@ def run_fixer(
             cwd=repo, capture_output=True, text=True, timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
-        return FixerResult(-1, _as_text(exc.stdout), _as_text(exc.stderr) or "timed out", timed_out=True)
+        return FixerResult(-1, as_text(exc.stdout), as_text(exc.stderr) or "timed out", timed_out=True)
     return FixerResult(proc.returncode, proc.stdout, proc.stderr)

@@ -83,3 +83,16 @@ def test_invoke_phase_timeout_preserves_partial_output(monkeypatch, tmp_path):
     assert inv.timed_out is True
     assert inv.stdout == "partial work\n"
     assert inv.stderr == "warn"
+
+
+def test_invoke_phase_timeout_decodes_bytes_output(monkeypatch, tmp_path):
+    # Real timeouts deliver bytes even under text=True; PhaseInvocation fields
+    # are typed str and downstream parse_verdict does str ops — must be decoded.
+    def _raise(cmd, **kw):
+        raise subprocess.TimeoutExpired(cmd, 1, output=b"partial\n", stderr=b"warn")
+
+    monkeypatch.setattr(workflow.subprocess, "run", _raise)
+    inv = workflow.invoke_phase("start", 3, tmp_path, [])
+    assert inv.timed_out is True
+    assert isinstance(inv.stdout, str) and inv.stdout == "partial\n"
+    assert isinstance(inv.stderr, str) and inv.stderr == "warn"
