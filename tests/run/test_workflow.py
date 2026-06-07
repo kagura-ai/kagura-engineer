@@ -50,6 +50,7 @@ def test_invoke_phase_runs_claude_in_worktree_and_parses(monkeypatch, tmp_path):
     assert inv.verdict == "green"
     assert inv.pr_url == "https://x/pull/1"
     assert inv.returncode == 0
+    assert inv.phase == "ship"
 
 
 def test_invoke_phase_nonzero_returncode_keeps_output(monkeypatch, tmp_path):
@@ -71,3 +72,14 @@ def test_invoke_phase_timeout_returns_marker(monkeypatch, tmp_path):
     inv = workflow.invoke_phase("start", 3, tmp_path, [])
     assert inv.returncode == -1
     assert inv.timed_out is True
+
+
+def test_invoke_phase_timeout_preserves_partial_output(monkeypatch, tmp_path):
+    def _raise(cmd, **kw):
+        raise subprocess.TimeoutExpired(cmd, 1, output="partial work\n", stderr="warn")
+
+    monkeypatch.setattr(workflow.subprocess, "run", _raise)
+    inv = workflow.invoke_phase("start", 3, tmp_path, [])
+    assert inv.timed_out is True
+    assert inv.stdout == "partial work\n"
+    assert inv.stderr == "warn"

@@ -69,13 +69,21 @@ def invoke_phase(
     *, timeout: int = _PHASE_TIMEOUT_S,
 ) -> PhaseInvocation:
     prompt = build_prompt(phase, issue, grounding)
+    # OSError (claude not on PATH) is deliberately NOT caught here: the
+    # run guard (doctor's blocking gh-issue-driven/claude check) verifies
+    # claude is launchable before invoke_phase is ever reached.
     try:
         proc = subprocess.run(
             ["claude", "-p", prompt],
             cwd=worktree, capture_output=True, text=True, timeout=timeout,
         )
-    except subprocess.TimeoutExpired:
-        return PhaseInvocation(phase, -1, "", "timed out", None, None, timed_out=True)
+    except subprocess.TimeoutExpired as exc:
+        # Preserve any partial output captured before the kill — invaluable
+        # for diagnosing what a 30-min phase was doing when it stalled.
+        return PhaseInvocation(
+            phase, -1, exc.stdout or "", exc.stderr or "timed out",
+            None, None, timed_out=True,
+        )
     return PhaseInvocation(
         phase, proc.returncode, proc.stdout, proc.stderr,
         parse_verdict(proc.stdout), parse_pr_url(proc.stdout),
