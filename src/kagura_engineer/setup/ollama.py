@@ -41,7 +41,7 @@ import time
 import urllib.error
 import urllib.request
 
-from .install import run_install
+from .install import run_install, stderr_tail
 from .platform import OSKind, PkgManagerKind, PlatformInfo
 from .result import StepResult, StepStatus
 
@@ -297,10 +297,9 @@ def pull_ollama_models(
                 duration_s=time.monotonic() - started,
             )
         if proc.returncode != 0:
-            stderr_tail = (proc.stderr or "").strip().splitlines()[-1] if proc.stderr else ""
             return StepResult(
                 name, StepStatus.FAIL,
-                f"ollama pull {model} exited {proc.returncode}: {stderr_tail or '(no stderr)'}",
+                f"ollama pull {model} exited {proc.returncode}: {stderr_tail(proc.stderr) or '(no stderr)'}",
                 fix_hint=f"run `ollama pull {model}` manually to see the error",
                 duration_s=time.monotonic() - started,
             )

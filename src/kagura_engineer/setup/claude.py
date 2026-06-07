@@ -35,6 +35,7 @@ import subprocess
 import time
 
 from .auth import AuthMethod, resolve_anthropic_auth
+from .install import stderr_tail
 from .result import StepResult, StepStatus
 
 INSTALL_URL = "https://claude.ai/install.sh"
@@ -84,11 +85,10 @@ def _install_claude() -> StepResult | None:
             fix_hint=f"try running the install command manually: curl -fsSL {INSTALL_URL} | bash",
         )
     if proc.returncode != 0:
-        stderr_tail = (proc.stderr or "").strip().splitlines()[-1] if proc.stderr else ""
         return StepResult(
             "claude-code",
             StepStatus.FAIL,
-            f"install exited {proc.returncode}: {stderr_tail or '(no stderr)'}",
+            f"install exited {proc.returncode}: {stderr_tail(proc.stderr) or '(no stderr)'}",
             fix_hint=f"run the install manually: curl -fsSL {INSTALL_URL} | bash",
         )
     return None

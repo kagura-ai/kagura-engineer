@@ -196,6 +196,29 @@ def test_run_install_fail_on_nonzero_exit(monkeypatch):
     assert "100" in r.detail or "exit" in r.detail.lower()
 
 
+def test_run_install_fail_on_nonzero_exit_with_whitespace_stderr(monkeypatch):
+    # A failed command whose stderr is only whitespace/newlines must still
+    # report a clean FAIL, not crash with IndexError from
+    # "".splitlines()[-1] (the truthy-but-blank stderr trap).
+    monkeypatch.setattr("time.monotonic", lambda: 1.0)
+    monkeypatch.setattr(
+        "subprocess.run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 100, stdout="", stderr="\n  \n"),
+    )
+
+    r = run_install(
+        step_name="git",
+        binary="git",
+        cmd=["sudo", "apt-get", "install", "-y", "git"],
+        platform=_LINUX_APT,
+        dry_run=False,
+        no_input=False,
+    )
+    assert r.status is StepStatus.FAIL
+    assert "100" in r.detail
+    assert "no stderr" in r.detail
+
+
 def test_run_install_fail_on_subprocess_raises(monkeypatch):
     monkeypatch.setattr("time.monotonic", lambda: 1.0)
     def _raise(*a, **k):

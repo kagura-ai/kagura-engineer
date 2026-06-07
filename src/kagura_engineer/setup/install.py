@@ -57,6 +57,17 @@ _NO_INPUT_NO_CMD_HINT = (
 )
 
 
+def stderr_tail(stderr: str | None) -> str:
+    """Last non-blank line of a process's stderr, or "" when there is none.
+
+    Guards the truthy-but-blank trap: `"\\n"` is a truthy string, so a naive
+    `stderr.strip().splitlines()[-1] if stderr else ""` raises IndexError on
+    whitespace-only stderr. Strip first, then index only if a line survives.
+    """
+    lines = (stderr or "").strip().splitlines()
+    return lines[-1] if lines else ""
+
+
 def _needs_user_hint(platform: PlatformInfo) -> str:
     if platform.os is OSKind.WINDOWS:
         return NEEDS_USER_HINT_WINDOWS
@@ -137,11 +148,10 @@ def run_install(
         )
 
     if proc.returncode != 0:
-        stderr_tail = (proc.stderr or "").strip().splitlines()[-1] if proc.stderr else ""
         return StepResult(
             step_name,
             StepStatus.FAIL,
-            f"install exited {proc.returncode}: {stderr_tail or '(no stderr)'}",
+            f"install exited {proc.returncode}: {stderr_tail(proc.stderr) or '(no stderr)'}",
             fix_hint=f"run `{' '.join(cmd)}` manually to see the error",
             duration_s=time.monotonic() - started,
         )

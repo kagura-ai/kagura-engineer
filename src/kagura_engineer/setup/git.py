@@ -24,6 +24,7 @@ import shutil
 import subprocess
 import time
 
+from .install import stderr_tail
 from .platform import OSKind, PkgManagerKind, PlatformInfo
 from .result import StepResult, StepStatus
 
@@ -130,11 +131,10 @@ def ensure_git(
         )
 
     if proc.returncode != 0:
-        stderr_tail = (proc.stderr or "").strip().splitlines()[-1] if proc.stderr else ""
         return StepResult(
             name,
             StepStatus.FAIL,
-            f"install exited {proc.returncode}: {stderr_tail or '(no stderr)'}",
+            f"install exited {proc.returncode}: {stderr_tail(proc.stderr) or '(no stderr)'}",
             fix_hint=f"run `{' '.join(cmd)}` manually to see the error",
             duration_s=time.monotonic() - started,
         )
