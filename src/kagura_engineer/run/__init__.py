@@ -76,10 +76,14 @@ def run_idea(
 
     # 1. recall — grounding + resume point. Memory is core: a failure here
     # is a hard FAIL (we do not run ungrounded), surfaced cleanly not as a crash.
+    recalled_ids: list[str] = []
     try:
-        grounding = mem.load_pinned(cfg.context_id) + mem.recall(
+        pinned = mem.load_pinned(cfg.context_id)
+        recalled = mem.recall_detailed(
             cfg.context_id, f"issue {issue} implementation context", k=5
         )
+        recalled_ids = [mid for mid, _ in recalled]
+        grounding = pinned + [s for _, s in recalled]
         resumed = mem.get_state(cfg.context_id, _state_key(issue))
     except Exception as exc:  # noqa: BLE001 — convert any SDK leak to a FAIL phase
         _log.exception("run recall phase failed")
@@ -140,8 +144,12 @@ def run_idea(
 
     # 5. persist. The PR already exists, so a persist failure is non-fatal:
     # the run still succeeded; we record the lost savepoint in the detail.
+    # We also reinforce the memories that grounded this successful run, so the
+    # ones that actually helped surface earlier next time (recall→act→reinforce).
     if not no_remember:
         try:
+            for mid in recalled_ids:
+                mem.feedback(cfg.context_id, mid)
             mem.remember(
                 cfg.context_id,
                 summary=f"run #{issue} → PR {pr_url or '(no url)'}",
@@ -150,7 +158,8 @@ def run_idea(
                 tags=[f"repo:{root.name}", "run", f"issue:{issue}"],
             )
             mem.set_state(cfg.context_id, _state_key(issue), {"done": True, "pr_url": pr_url})
-            phases.append(PhaseResult("persist", RunStatus.OK, "savepoint stored"))
+            reinforced = f"; reinforced {len(recalled_ids)} memories" if recalled_ids else ""
+            phases.append(PhaseResult("persist", RunStatus.OK, f"savepoint stored{reinforced}"))
         except Exception as exc:  # noqa: BLE001 — PR is done; persist is best-effort
             _log.exception("run persist phase failed (non-fatal)")
             phases.append(PhaseResult("persist", RunStatus.OK, f"savepoint store failed (non-fatal): {type(exc).__name__}"))

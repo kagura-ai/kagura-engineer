@@ -56,7 +56,12 @@ offline impl with **zero new dependencies** (stdlib `sqlite3`), making grounded
 - ✅ **`doctor` check for the memory backend** — done: the doctor "memory" check
   is now backend-aware (`check_local_memory` probes the SQLite path is
   creatable/writable when `memory_backend=local`; cloud reachability otherwise).
-- ⏳ Rich `explore` (Hebbian graph), `feedback` auto-tuning, Sleep consolidation
-  — Cloud-SDK + live-integration work; needs a Protocol redesign (recall must
-  return memory ids for feedback/explore). Deferred pending design input.
+- ✅ **`feedback` reinforcement loop** — done: `MemoryClient` gained
+  `recall_detailed` (returns `(id, summary)`) and `feedback(context_id,
+  memory_id, weight)`. `run_idea` recalls with ids and, on a successful run,
+  reinforces the memories that grounded it (recall→act→reinforce). Local impl
+  bumps importance (a recall tie-break, so reinforced memories surface earlier);
+  cloud impl passes through to the SDK `feedback`.
+- ⏳ Rich `explore` (Hebbian graph) + Sleep consolidation — Cloud-SDK + live
+  integration; deferred.
 - ⏳ Embedding-based local recall, local pinning, importance/tag query filters.

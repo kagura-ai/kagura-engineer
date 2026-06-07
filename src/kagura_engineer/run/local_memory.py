@@ -63,26 +63,42 @@ class LocalMemoryClient:
         return [r[0] for r in rows]
 
     def recall(self, context_id: str, query: str, *, k: int = 5) -> list[str]:
+        return [s for _, s in self.recall_detailed(context_id, query, k=k)]
+
+    def recall_detailed(
+        self, context_id: str, query: str, *, k: int = 5
+    ) -> list[tuple[str, str]]:
         # Distinct query terms; substring match (so "cat" also hits "category")
         # is intentional for a simple offline heuristic. Deduped so a repeated
         # term cannot inflate the overlap score.
         terms = {t for t in query.lower().split() if t}
         rows = self._conn.execute(
-            "SELECT summary, content, importance FROM memories WHERE context_id = ? "
+            "SELECT id, summary, content, importance FROM memories WHERE context_id = ? "
             "ORDER BY rowid DESC",
             (context_id,),
         ).fetchall()
-        scored: list[tuple[int, float, str]] = []
-        for summary, content, importance in rows:
+        scored: list[tuple[int, float, str, str]] = []
+        for mem_id, summary, content, importance in rows:
             hay = f"{summary}\n{content}".lower()
             score = sum(1 for t in terms if t in hay)
             if terms and score == 0:
                 continue  # query given but nothing matched → drop
-            scored.append((score, importance, summary))
+            scored.append((score, importance, mem_id, summary))
         # rows arrived recency-first; a stable sort by (score, importance) keeps
-        # recency as the final tie-breaker.
+        # recency as the final tie-breaker. feedback() raises importance, so
+        # reinforced memories rank higher on later recalls (Hebbian-ish).
         scored.sort(key=lambda s: (s[0], s[1]), reverse=True)
-        return [s[2] for s in scored[:k]]
+        return [(s[2], s[3]) for s in scored[:k]]
+
+    def feedback(self, context_id: str, memory_id: str, *, weight: float = 1.0) -> None:
+        # Reinforce: nudge importance toward 1.0 (capped). Importance is a
+        # recall tie-breaker, so reinforced memories surface earlier next time.
+        self._conn.execute(
+            "UPDATE memories SET importance = MIN(1.0, importance + ?) "
+            "WHERE id = ? AND context_id = ?",
+            (0.1 * weight, memory_id, context_id),
+        )
+        self._conn.commit()
 
     def remember(
         self, context_id: str, *, summary: str, content: str, type: str,

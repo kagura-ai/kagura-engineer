@@ -89,3 +89,32 @@ def test_creates_parent_dir(tmp_path):
     c = LocalMemoryClient(str(nested))
     c.remember(CTX, summary="x", content="y", type="note")
     assert nested.is_file()
+
+
+def test_recall_detailed_returns_id_summary_pairs(tmp_path):
+    c = _client(tmp_path)
+    mid = c.remember(CTX, summary="worktree note", content="x", type="note")
+    assert c.recall_detailed(CTX, "worktree") == [(mid, "worktree note")]
+
+
+def test_feedback_raises_recall_rank(tmp_path):
+    c = _client(tmp_path)
+    a = c.remember(CTX, summary="alpha one", content="", type="note")
+    c.remember(CTX, summary="alpha two", content="", type="note")
+    # equal match + importance → newer ("alpha two") wins the recency tie-break
+    assert c.recall(CTX, "alpha", k=1) == ["alpha two"]
+    c.feedback(CTX, a)  # reinforce the older one past the tie-break
+    assert c.recall(CTX, "alpha", k=1) == ["alpha one"]
+
+
+def test_feedback_caps_importance_at_one(tmp_path):
+    c = _client(tmp_path)
+    mid = c.remember(CTX, summary="x", content="", type="note")
+    for _ in range(50):
+        c.feedback(CTX, mid)  # must not exceed 1.0 / crash
+    assert c.recall(CTX, "x") == ["x"]
+
+
+def test_feedback_unknown_id_is_noop(tmp_path):
+    c = _client(tmp_path)
+    c.feedback(CTX, "does-not-exist")  # no row updated, no error

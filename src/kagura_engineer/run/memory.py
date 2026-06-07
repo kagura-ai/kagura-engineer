@@ -23,10 +23,18 @@ from ..config import Config
 class MemoryClient(Protocol):
     def load_pinned(self, context_id: str) -> list[str]: ...
     def recall(self, context_id: str, query: str, *, k: int = 5) -> list[str]: ...
+    # Like recall, but returns (memory_id, summary) pairs so the caller can
+    # reinforce the memories it actually used via feedback().
+    def recall_detailed(
+        self, context_id: str, query: str, *, k: int = 5
+    ) -> list[tuple[str, str]]: ...
     def remember(
         self, context_id: str, *, summary: str, content: str, type: str,
         tags: list[str] | None = None,
     ) -> str: ...
+    # Reinforce a memory that proved useful (Hebbian-style). `weight` scales
+    # the reinforcement; the implementation decides how it is applied.
+    def feedback(self, context_id: str, memory_id: str, *, weight: float = 1.0) -> None: ...
     def get_state(self, context_id: str, key: str) -> dict | None: ...
     def set_state(self, context_id: str, key: str, value: dict) -> None: ...
 
@@ -58,8 +66,26 @@ class KaguraCloudClient:
         return [m["summary"] for m in resp.get("memories", []) if m.get("summary")]
 
     def recall(self, context_id: str, query: str, *, k: int = 5) -> list[str]:
+        # Grounding-only: summaries are useful even for an id-less row, so this
+        # keeps a looser filter than recall_detailed (which needs ids for feedback).
         resp = self._sdk.recall(context_id, query=query, k=k, filters=_TRUST_FILTER)
         return [r["summary"] for r in resp.get("results", []) if r.get("summary")]
+
+    def recall_detailed(
+        self, context_id: str, query: str, *, k: int = 5
+    ) -> list[tuple[str, str]]:
+        resp = self._sdk.recall(context_id, query=query, k=k, filters=_TRUST_FILTER)
+        return [
+            (r["memory_id"], r["summary"])
+            for r in resp.get("results", [])
+            if r.get("summary") and r.get("memory_id")
+        ]
+
+    def feedback(self, context_id: str, memory_id: str, *, weight: float = 1.0) -> None:
+        # SDK passthrough — reinforce the memory's neural weight. Not exercised
+        # by the offline test suite (the SDK isn't a declared dependency); the
+        # contract mirrors the mcp `feedback` tool.
+        self._sdk.feedback(context_id, memory_id=memory_id, weight=weight)
 
     def remember(
         self, context_id: str, *, summary: str, content: str, type: str,

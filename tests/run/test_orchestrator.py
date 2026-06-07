@@ -21,9 +21,13 @@ class _FakeMemory:
     def __init__(self):
         self.state = {}
         self.remembered = []
+        self.feedback_calls = []
 
     def load_pinned(self, context_id): return ["guardrail: TDD"]
     def recall(self, context_id, query, *, k=5): return ["decision A"]
+    def recall_detailed(self, context_id, query, *, k=5): return [("m1", "decision A")]
+    def feedback(self, context_id, memory_id, *, weight=1.0):
+        self.feedback_calls.append(memory_id)
     def remember(self, context_id, *, summary, content, type, tags=None):
         self.remembered.append((type, summary)); return "mem-1"
     def get_state(self, context_id, key): return self.state.get(key)
@@ -125,7 +129,7 @@ def test_recall_error_is_fail(monkeypatch):
     _patch_boundaries(monkeypatch, phases={})
 
     class _BrokenMemory(_FakeMemory):
-        def recall(self, context_id, query, *, k=5):
+        def recall_detailed(self, context_id, query, *, k=5):
             raise RuntimeError("kagura connection refused")
 
     report = run_idea(_cfg(), 42, memory=_BrokenMemory(), repo_root=Path("/repo"))
@@ -222,3 +226,24 @@ def test_resume_skips_already_shipped_issue(monkeypatch):
     assert report.status is RunStatus.OK
     assert report.pr_url == "https://x/pull/7"
     assert mem.remembered == []  # no re-persist
+
+
+def test_successful_run_reinforces_recalled_memories(monkeypatch):
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/1"),
+    })
+    mem = _FakeMemory()
+    report = run_idea(_cfg(), 9, memory=mem, repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK
+    assert mem.feedback_calls == ["m1"]  # the recalled memory id was reinforced
+
+
+def test_no_remember_skips_reinforcement(monkeypatch):
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/1"),
+    })
+    mem = _FakeMemory()
+    run_idea(_cfg(), 9, no_remember=True, memory=mem, repo_root=Path("/repo"))
+    assert mem.feedback_calls == []

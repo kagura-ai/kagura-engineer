@@ -108,3 +108,30 @@ def test_invalid_memory_backend_raises_config_error(tmp_path):
     )
     with pytest.raises(ConfigError):
         load_config(str(cfg))
+
+
+# --- Plan 5+: recall_detailed + feedback on the cloud client ---------------
+
+
+def test_cloud_recall_detailed_returns_pairs_and_recall_wraps():
+    from kagura_engineer.run.memory import KaguraCloudClient
+
+    class _Sdk:
+        def recall(self, context_id, *, query, k, filters):
+            return {"results": [{"memory_id": "a", "summary": "S1"}, {"summary": "no-id"}]}
+
+    c = KaguraCloudClient(_Sdk())
+    assert c.recall_detailed("ctx", "q") == [("a", "S1")]  # needs id → drops id-less row
+    assert c.recall("ctx", "q") == ["S1", "no-id"]  # summary-only → keeps both
+
+
+def test_cloud_feedback_passthrough():
+    from kagura_engineer.run.memory import KaguraCloudClient
+    seen = {}
+
+    class _Sdk:
+        def feedback(self, context_id, *, memory_id, weight):
+            seen.update(context_id=context_id, memory_id=memory_id, weight=weight)
+
+    KaguraCloudClient(_Sdk()).feedback("ctx", "m1", weight=2.0)
+    assert seen == {"context_id": "ctx", "memory_id": "m1", "weight": 2.0}
