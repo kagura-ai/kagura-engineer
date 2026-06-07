@@ -6,6 +6,7 @@ import pytest
 
 from kagura_engineer.doctor import checks
 from kagura_engineer.doctor.result import Status
+from kagura_engineer.setup import auth as auth_module
 
 
 def _completed(returncode=0, stdout="", stderr=""):
@@ -208,7 +209,7 @@ def test_haiku_warn_without_auth(monkeypatch, tmp_path):
     # No env, no credential cache anywhere → WARN.
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     fake_home = tmp_path  # empty dir, no .claude/ and no .claude.json
-    monkeypatch.setattr(checks.Path, "home", classmethod(lambda cls: fake_home))
+    monkeypatch.setattr(auth_module.Path, "home", classmethod(lambda cls: fake_home))
     r = checks.check_haiku()
     assert r.status is Status.WARN
 
@@ -232,7 +233,7 @@ def test_haiku_ok_with_subscription_credential_cache(monkeypatch, tmp_path):
     cred = fake_home / ".claude" / ".credentials.json"
     cred.parent.mkdir(parents=True)
     cred.write_text("{}")  # contents don't matter for P1
-    monkeypatch.setattr(checks.Path, "home", classmethod(lambda cls: fake_home))
+    monkeypatch.setattr(auth_module.Path, "home", classmethod(lambda cls: fake_home))
     r = checks.check_haiku()
     assert r.status is Status.OK
     assert "subscription" in r.detail.lower()
@@ -243,7 +244,7 @@ def test_haiku_ok_with_legacy_claude_json(monkeypatch, tmp_path):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     fake_home = tmp_path
     (fake_home / ".claude.json").write_text("{}")
-    monkeypatch.setattr(checks.Path, "home", classmethod(lambda cls: fake_home))
+    monkeypatch.setattr(auth_module.Path, "home", classmethod(lambda cls: fake_home))
     r = checks.check_haiku()
     assert r.status is Status.OK
     assert "subscription" in r.detail.lower()

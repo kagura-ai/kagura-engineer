@@ -7,8 +7,8 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
-from pathlib import Path
 
+from ..setup.auth import AuthMethod, resolve_anthropic_auth
 from .result import CheckResult, Status
 
 _TIMEOUT = 5
@@ -147,38 +147,34 @@ def check_ollama(base_url: str, required: list[str]) -> CheckResult:
 
 
 def check_haiku() -> CheckResult:
-    key = os.environ.get("ANTHROPIC_API_KEY")
-    if key is not None and key == "":
+    # Empty string is a deliberate "unset" signal; surface it as a
+    # config error so the user fixes it before re-running.
+    raw = os.environ.get("ANTHROPIC_API_KEY")
+    if raw is not None and raw == "":
         return CheckResult(
             "haiku",
             Status.FAIL,
             "ANTHROPIC_API_KEY is set to empty string",
             "unset or set a real value",
         )
-    if key:
+    res = resolve_anthropic_auth()
+    if res.method is AuthMethod.ENV_API_KEY:
         return CheckResult(
             "haiku",
             Status.OK,
             "env ANTHROPIC_API_KEY is set; no API probe in P1",
         )
-    # Subscription path: check the Claude Code credential cache.
-    # `~/.claude/.credentials.json` (preferred, modern) and `~/.claude.json` (legacy)
-    # are written by `claude` on first interactive login. We treat presence as
-    # "subscription login has happened at some point"; mtime is informational.
-    candidates = [
-        Path.home() / ".claude" / ".credentials.json",
-        Path.home() / ".claude.json",
-    ]
-    for path in candidates:
+    if res.method is AuthMethod.SUBSCRIPTION_CACHE:
+        # Decorate the detail with cache age (informational, not gating).
+        assert res.cache_path is not None
         try:
-            stat = path.stat()
+            age_days = (time.time() - res.cache_path.stat().st_mtime) / 86400
         except OSError:
-            continue
-        age_days = (time.time() - stat.st_mtime) / 86400
+            age_days = 0
         return CheckResult(
             "haiku",
             Status.OK,
-            f"subscription login detected (credential cache: {path}, {age_days:.0f}d old); no live probe in P1",
+            f"{res.detail}, {age_days:.0f}d old; no live probe in P1",
         )
     return CheckResult(
         "haiku",
