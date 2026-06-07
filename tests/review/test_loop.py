@@ -94,3 +94,17 @@ def test_review_fail_does_not_fix(monkeypatch, tmp_path):
     assert rep.status is ReviewStatus.FAIL
     assert rep.fixes_attempted == 0
     assert calls["fix"] == 0
+
+
+def test_mcp_config_threads_to_run_fixer(monkeypatch, tmp_path):
+    seen = {}
+    _seq_review(monkeypatch, [ReviewStatus.BLOCKED, ReviewStatus.OK])
+
+    def _fixer(repo, prompt, *, mcp_config=None, **kw):
+        seen["mcp"] = mcp_config
+        return FixerResult(0, "", "")
+
+    monkeypatch.setattr(loop, "run_fixer", _fixer, raising=True)
+    cfg = _cfg().model_copy(update={"memory_mcp_config": "/tmp/m.json"})
+    review_fix_loop(cfg, "HEAD", base="main", memory=_Mem(), repo_root=tmp_path)
+    assert seen["mcp"] == "/tmp/m.json"

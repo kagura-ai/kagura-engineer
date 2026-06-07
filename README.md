@@ -25,7 +25,7 @@ chain and a `setup` that resolves it.
 | **Plan 5** | `LocalMemoryClient` — offline SQLite memory backend | ✅ done |
 | Plan 5+ | rich graph/feedback/Sleep usage, memory auto-store, worktree runs | 📋 planned |
 
-`doctor`, `setup`, `run`, `review`, and `goal` are runnable now (353 tests green).
+`doctor`, `setup`, `run`, `review`, and `goal` are runnable now (363 tests green).
 
 ---
 
@@ -72,6 +72,7 @@ context_id: 00000000-0000-0000-0000-000000000000  # required — context within 
 ollama_url: http://localhost:11434                 # optional (default shown)
 memory_backend: cloud                              # optional: cloud | local (default: cloud)
 local_memory_path: .kagura/memory.db               # optional (used only when backend=local)
+memory_mcp_config: .mcp/kagura-memory.json         # optional: attach memory MCP to headless phases
 review:
   models: [qwen2.5-coder:7b, haiku]               # optional (default: [])
   max_loops: 3                                      # optional (default: 3)
@@ -86,6 +87,13 @@ grounding to an offline SQLite store (`local_memory_path`, stdlib `sqlite3` —
 no API key, no network). It implements the same client Protocol as the Kagura
 Memory Cloud backend; offline recall is a keyword-overlap match (no embeddings),
 and pinning stays a Cloud-only feature. Use it to run fully offline or in CI.
+
+**In-task memory MCP.** By default the harness *string-injects* recalled memory
+into each headless `claude -p` prompt. Set `memory_mcp_config` to a Claude Code
+MCP config (`{"mcpServers": {"kagura-memory": {…}}}`) and the run/fix phases get
+the `kagura-memory` recall/remember tools attached (`--mcp-config`, additive),
+so the model can recall *during* the task. The server's tools must be permitted
+in your Claude settings; recalled content is treated as untrusted reference.
 
 ---
 

@@ -101,7 +101,8 @@ def run_idea(
     pr_url = None
     for phase in _PHASES:
         try:
-            inv = invoke_phase(phase, issue, wt, grounding, unattended=unattended)
+            inv = invoke_phase(phase, issue, wt, grounding, unattended=unattended,
+                               mcp_config=cfg.memory_mcp_config)
         except OSError as exc:
             _log.exception("run %s phase failed to launch claude", phase)
             phases.append(PhaseResult(phase, RunStatus.FAIL, f"failed to launch claude: {exc}"))

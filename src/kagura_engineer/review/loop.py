@@ -82,9 +82,10 @@ def review_fix_loop(
         # Only the genuinely-blocking findings drive the fix; the full report
         # (report_path) still carries the rest for the actor to read if needed.
         blocking = [f for f in rep.findings if f.severity.upper() in _BLOCKING_SEVERITIES]
-        prompt = build_fix_prompt(rep.report_path, blocking or rep.findings)
+        prompt = build_fix_prompt(rep.report_path, blocking or rep.findings,
+                                  mcp_enabled=bool(cfg.memory_mcp_config))
         try:
-            fix = run_fixer(root, prompt)
+            fix = run_fixer(root, prompt, mcp_config=cfg.memory_mcp_config)
         except OSError as exc:
             _log.exception("review --fix could not launch claude")
             return _finish(ReviewStatus.FAIL, f"could not launch claude for fix: {exc}")

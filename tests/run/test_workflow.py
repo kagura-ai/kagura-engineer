@@ -117,3 +117,37 @@ def test_invoke_phase_forwards_unattended_into_prompt(monkeypatch, tmp_path):
     monkeypatch.setattr(workflow.subprocess, "run", _run)
     workflow.invoke_phase("ship", 2, tmp_path, [], unattended=True)
     assert "UNATTENDED" in captured["prompt"]
+
+
+def test_build_prompt_mcp_note_when_enabled():
+    p = workflow.build_prompt("start", 1, [], mcp_enabled=True)
+    assert "mcp__kagura-memory__recall" in p
+    assert "UNTRUSTED" in p
+
+
+def test_build_prompt_no_mcp_note_by_default():
+    assert "mcp__kagura-memory" not in workflow.build_prompt("start", 1, [])
+
+
+def test_invoke_phase_attaches_mcp_config(monkeypatch, tmp_path):
+    cap = {}
+
+    def _run(cmd, **kw):
+        cap["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, "KAGURA_VERDICT=green\n", "")
+
+    monkeypatch.setattr(workflow.subprocess, "run", _run)
+    workflow.invoke_phase("ship", 2, tmp_path, [], mcp_config="/tmp/m.json")
+    assert "--mcp-config" in cap["cmd"] and "/tmp/m.json" in cap["cmd"]
+
+
+def test_invoke_phase_no_mcp_flags_by_default(monkeypatch, tmp_path):
+    cap = {}
+
+    def _run(cmd, **kw):
+        cap["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(workflow.subprocess, "run", _run)
+    workflow.invoke_phase("ship", 2, tmp_path, [])
+    assert "--mcp-config" not in cap["cmd"]

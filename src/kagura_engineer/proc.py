@@ -2,6 +2,23 @@
 from __future__ import annotations
 
 
+# The in-task memory tools we pre-approve for headless `claude -p` sessions.
+_MEMORY_TOOLS = ("mcp__kagura-memory__recall", "mcp__kagura-memory__remember")
+
+
+def mcp_args(mcp_config: str | None) -> list[str]:
+    """Extra `claude -p` argv to attach a memory MCP server for in-task recall.
+
+    Additive (no ``--strict-mcp-config``) so it merges with — rather than
+    replaces — any MCP servers the delegated skills rely on. Pre-approves the
+    recall/remember tools so they run without an interactive prompt. Empty when
+    no config is set (string-injected grounding only — the default).
+    """
+    if not mcp_config:
+        return []
+    return ["--mcp-config", mcp_config, "--allowedTools", *_MEMORY_TOOLS]
+
+
 def as_text(value: bytes | str | None) -> str:
     """Normalize subprocess stdout/stderr to ``str``.
 

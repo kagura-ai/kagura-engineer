@@ -65,3 +65,20 @@ def test_run_fixer_timeout_decodes_bytes(monkeypatch, tmp_path):
     assert res.returncode == -1
     assert isinstance(res.stdout, str) and res.stdout == "partial\n"
     assert isinstance(res.stderr, str) and res.stderr == "warn"
+
+
+def test_build_fix_prompt_mcp_note_when_enabled():
+    p = fixer.build_fix_prompt(None, _findings(), mcp_enabled=True)
+    assert "mcp__kagura-memory__recall" in p
+
+
+def test_run_fixer_attaches_mcp_config(monkeypatch, tmp_path):
+    cap = {}
+
+    def _run(cmd, **kw):
+        cap["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(fixer.subprocess, "run", _run)
+    fixer.run_fixer(tmp_path, "p", mcp_config="/tmp/m.json")
+    assert "--mcp-config" in cap["cmd"] and "/tmp/m.json" in cap["cmd"]

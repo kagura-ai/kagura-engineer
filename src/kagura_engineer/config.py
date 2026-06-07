@@ -30,6 +30,11 @@ class Config(BaseModel):
     # SQLite, no API key). `local_memory_path` is used only when backend=local.
     memory_backend: Literal["cloud", "local"] = "cloud"
     local_memory_path: str = ".kagura/memory.db"
+    # Optional path to a Claude Code MCP config (JSON {"mcpServers": {...}})
+    # exposing a kagura-memory server. When set, headless `claude -p` phases get
+    # the memory MCP tools attached for in-task recall (default: string injection
+    # only). The server's tools must be permitted in your Claude settings.
+    memory_mcp_config: str | None = None
 
 
 def load_config(path: str | Path) -> Config:
