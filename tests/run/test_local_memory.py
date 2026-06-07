@@ -178,3 +178,13 @@ def test_decay_lowers_importance(tmp_path):
     assert c.decay(CTX, factor=0.5) == 1  # 0.5 -> 0.25
     assert c.recall(CTX, "alpha", min_importance=0.45) == []      # filtered out
     assert c.recall(CTX, "alpha", min_importance=0.2) == ["alpha"]  # still there
+
+
+def test_decay_keeps_importance_within_unit_interval(tmp_path):
+    c = _client(tmp_path)
+    a = c.remember(CTX, summary="alpha", content="", type="note")  # 0.5
+    c.decay(CTX, factor=3.0)  # 0.5*3 = 1.5 → must clamp to 1.0, not exceed
+    # importance is now <=1.0: a feedback bump stays capped, recall still works
+    assert c.recall(CTX, "alpha", min_importance=1.0) == ["alpha"]   # exactly 1.0
+    c.feedback(CTX, a)  # 1.0 + 0.1 → still capped at 1.0 (no overflow)
+    assert c.recall(CTX, "alpha", min_importance=1.0) == ["alpha"]

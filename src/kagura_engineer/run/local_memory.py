@@ -153,7 +153,8 @@ class LocalMemoryClient:
         reinforced memories relax back over time. Returns the row count touched.
         (Full Cloud Sleep consolidation is server-side, not a client call.)"""
         cur = self._conn.execute(
-            "UPDATE memories SET importance = MAX(0.0, importance * ?) WHERE context_id = ?",
+            "UPDATE memories SET importance = MAX(0.0, MIN(1.0, importance * ?)) "
+            "WHERE context_id = ?",
             (factor, context_id),
         )
         self._conn.commit()
