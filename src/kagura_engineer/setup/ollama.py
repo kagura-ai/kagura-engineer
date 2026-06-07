@@ -102,14 +102,15 @@ def _probe_daemon(ollama_url: str) -> dict:
         return json.loads(resp.read().decode())
 
 
-def _try_start_daemon() -> bool:
-    """Best-effort: spawn `ollama serve` in the background, wait a
-    few seconds, and return True if the daemon now answers.
+def _try_start_daemon() -> subprocess.Popen | None:
+    """Best-effort: spawn `ollama serve` in the background, wait a few
+    seconds, and return the still-running process handle (or None if it
+    could not be started / exited immediately).
 
-    We don't block on Popen for long; an `ollama serve` that takes
-    more than _SERVE_WAIT_S to bind is treated as 'serve failed'.
-    On a hung start, the user gets a NEEDS_USER hint to run it in
-    a terminal where they can see the actual error.
+    We don't block on Popen for long; an `ollama serve` that takes more
+    than _SERVE_WAIT_S to bind is treated as 'still coming up' and the
+    handle is returned so the caller can re-probe — and terminate it if
+    the daemon never actually answers the configured URL.
     """
     try:
         proc = subprocess.Popen(
@@ -119,17 +120,29 @@ def _try_start_daemon() -> bool:
             start_new_session=True,
         )
     except (OSError, subprocess.SubprocessError):
-        return False
+        return None
     # Naive wait: a real check would poll the /api/tags endpoint.
     # We bound the wait and let the post-check be the success signal.
     try:
         proc.wait(timeout=_SERVE_WAIT_S)
     except subprocess.TimeoutExpired:
-        # serve is still running; that's actually the success case
-        # (foreground serve would have returned immediately). Leave
-        # it running and let the caller re-probe.
-        return True
-    return False
+        # serve is still running; that's the expected case (a foreground
+        # serve would have returned immediately on failure). Hand the
+        # handle back so the caller owns its lifecycle.
+        return proc
+    # serve exited within the wait window -> it failed to stay up.
+    return None
+
+
+def _terminate(proc: subprocess.Popen | None) -> None:
+    """Stop a serve process we spawned but that isn't serving the
+    configured URL, so it doesn't leak as an orphan."""
+    if proc is None:
+        return
+    try:
+        proc.terminate()
+    except (OSError, subprocess.SubprocessError):
+        pass
 
 
 def ensure_ollama_up(
@@ -194,7 +207,7 @@ def ensure_ollama_up(
             duration_s=time.monotonic() - started,
         )
 
-    started_serve = _try_start_daemon()
+    serve_proc = _try_start_daemon()
     # Re-probe.
     try:
         _probe_daemon(ollama_url)
@@ -206,7 +219,11 @@ def ensure_ollama_up(
     except (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError):
         pass
 
-    # 4. Could not bring it up. Surface NEEDS_USER.
+    # 4. Could not bring it up. The serve we spawned (if any) is not
+    # answering the configured URL, so terminate it rather than leak it.
+    _terminate(serve_proc)
+
+    # Surface NEEDS_USER.
     if no_input:
         return StepResult(
             name, StepStatus.FAIL,

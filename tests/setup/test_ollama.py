@@ -131,6 +131,41 @@ def test_ensure_ollama_up_no_input_escalates_to_fail(monkeypatch):
     assert r.fix_hint is not None
 
 
+class _FakeProc:
+    """A spawned `ollama serve` that stays running (wait times out)."""
+
+    def __init__(self):
+        self.terminated = False
+
+    def wait(self, timeout=None):
+        raise subprocess.TimeoutExpired(cmd="ollama serve", timeout=timeout)
+
+    def terminate(self):
+        self.terminated = True
+
+    def kill(self):
+        self.terminated = True
+
+
+def test_ensure_ollama_up_terminates_orphan_when_probe_still_fails(monkeypatch):
+    # serve starts and stays running, but the daemon at the configured URL
+    # is still unreachable afterwards (e.g. a remote ollama_url while the
+    # spawned serve binds localhost). The spawned process must be
+    # terminated, not leaked as an orphan across repeated setup runs.
+    monkeypatch.setattr(ollama_setup.shutil, "which", lambda n: "/usr/bin/ollama" if n == "ollama" else None)
+    monkeypatch.setattr(
+        ollama_setup.urllib.request, "urlopen",
+        lambda *a, **k: (_ for _ in ()).throw(ollama_setup.urllib.error.URLError("down")),
+    )
+    fake = _FakeProc()
+    monkeypatch.setattr(ollama_setup.subprocess, "Popen", lambda *a, **k: fake)
+    monkeypatch.setattr(ollama_setup.time, "monotonic", lambda: 1.0)
+
+    r = ensure_ollama_up(_LINUX_APT, "http://remote-host:11434", no_input=False, dry_run=False)
+    assert r.status is StepStatus.NEEDS_USER
+    assert fake.terminated is True
+
+
 def test_ensure_ollama_up_dry_run_daemon_down_surfaces_preview(monkeypatch):
     # Probe first; if daemon is down, dry-run surfaces a preview
     # (the install command that would run).
