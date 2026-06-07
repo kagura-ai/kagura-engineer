@@ -109,3 +109,15 @@ def test_run_reviewer_timeout(monkeypatch, tmp_path):
     res = reviewer.run_reviewer(base="main", head="HEAD", repo=tmp_path, out=tmp_path / "r.json")
     assert res.timed_out is True
     assert res.returncode == -1
+
+
+def test_run_reviewer_timeout_with_partial_bytes_output(monkeypatch, tmp_path):
+    # Real timeouts deliver bytes even under text=True; result fields must be str.
+    def _raise(cmd, **kw):
+        raise subprocess.TimeoutExpired(cmd, 1, output=b"partial\n", stderr=b"warn")
+
+    monkeypatch.setattr(reviewer.subprocess, "run", _raise)
+    res = reviewer.run_reviewer(base="main", head="HEAD", repo=tmp_path, out=tmp_path / "r.json")
+    assert res.timed_out is True
+    assert isinstance(res.stdout, str) and res.stdout == "partial\n"
+    assert isinstance(res.stderr, str) and res.stderr == "warn"
