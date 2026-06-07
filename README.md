@@ -1,7 +1,7 @@
 # kagura-engineer
 
-> **Private repository.** Part of the Kagura Memory Cloud commercial offering.
-> Proprietary — © Kagura AI. See `LICENSE`.
+> Part of the Kagura Memory Cloud offering. Licensed under
+> [Apache-2.0](LICENSE) — © 2026 Kagura AI.
 
 An autonomous coding harness over [Claude Code](https://claude.ai/code) and
 [Kagura Memory Cloud](https://github.com/kagura-ai/memory-cloud).
@@ -32,10 +32,9 @@ Requires **Python ≥ 3.11**.
 
 ### As a tool (recommended)
 
-This is a proprietary package — it is **not** published to public PyPI. Install
-it straight from the repository (or, later, a private index). `uv` and `pipx`
-pull from git just as they would from an index; `uv` will also fetch a suitable
-Python for you.
+Not published to public PyPI (yet) — install straight from the repository
+(or, later, a private index). `uv` and `pipx` pull from git just as they would
+from an index; `uv` will also fetch a suitable Python for you.
 
 ```bash
 # uv (also bootstraps Python 3.11 if needed)
@@ -220,4 +219,5 @@ autonomous task execution with persistent memory — nothing more.
 
 ## License
 
-Proprietary — © Kagura AI. Not for redistribution. See `LICENSE` for terms.
+[Apache License 2.0](LICENSE) — © 2026 Kagura AI. See `LICENSE` for the full
+text and `NOTICE` for attribution.
