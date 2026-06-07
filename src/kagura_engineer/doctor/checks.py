@@ -223,7 +223,7 @@ def check_gh_issue_driven() -> CheckResult:
     refuse to start. Plugin root is overridable via KAGURA_PLUGINS_DIR
     for tests.
     """
-    root = Path(os.environ.get("KAGURA_PLUGINS_DIR", Path.home() / ".claude" / "plugins"))
+    root = Path(os.environ.get("KAGURA_PLUGINS_DIR") or str(Path.home() / ".claude" / "plugins"))
     hits = [p for p in root.glob("**/gh-issue-driven") if p.is_dir()] if root.exists() else []
     if hits:
         return CheckResult("gh-issue-driven", Status.OK, "plugin installed")
