@@ -21,6 +21,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..proc import as_text
+
 _PHASE_TIMEOUT_S = 1800  # 30 min per phase
 
 _VERDICT_RE = re.compile(r"^KAGURA_VERDICT=(\w+)\s*$", re.MULTILINE)
@@ -81,7 +83,7 @@ def invoke_phase(
         # Preserve any partial output captured before the kill — invaluable
         # for diagnosing what a 30-min phase was doing when it stalled.
         return PhaseInvocation(
-            phase, -1, exc.stdout or "", exc.stderr or "timed out",
+            phase, -1, as_text(exc.stdout), as_text(exc.stderr) or "timed out",
             None, None, timed_out=True,
         )
     return PhaseInvocation(

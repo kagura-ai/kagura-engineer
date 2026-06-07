@@ -15,17 +15,11 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..proc import as_text
 from .envelope import ReviewEnvelope
 
 _REVIEW_TIMEOUT_S = 1800  # 30 min — a large diff with high effort can be slow
 _NO_CHANGES = "No changes to review."
-
-
-def _as_text(value: bytes | str | None) -> str:
-    """TimeoutExpired carries raw bytes even under text=True; normalize to str."""
-    if isinstance(value, bytes):
-        return value.decode(errors="replace")
-    return value or ""
 
 
 @dataclass(frozen=True)
@@ -94,7 +88,7 @@ def run_reviewer(
         )
     except subprocess.TimeoutExpired as exc:
         return ReviewerResult(
-            -1, _as_text(exc.stdout), _as_text(exc.stderr) or "timed out",
+            -1, as_text(exc.stdout), as_text(exc.stderr) or "timed out",
             ReviewEnvelope(parsed=False), timed_out=True,
         )
 
