@@ -215,6 +215,22 @@ kagura-engineer goal v0.3 --json
 Exit codes: `0` all issues shipped · `1` hard fail · `2` blocked (an issue's
 gate halted — resolve it, then re-run).
 
+### Headless auth (`run` / `review --fix` / `goal`)
+
+These commands spawn headless `claude -p` subprocesses, which need a **valid
+Anthropic credential** in the environment — either a real `ANTHROPIC_API_KEY` or
+a `claude login` (claude.ai) session. `doctor`'s `claude-code` check only
+verifies the binary launches, not that auth works, so a bad credential surfaces
+as a phase that can't produce a verdict.
+
+> **Nested-in-Claude-Code gotcha:** if you run kagura-engineer from *inside* a
+> Claude Code session, the inherited `ANTHROPIC_API_KEY` is that session's
+> internal token and is **invalid for a standalone `claude -p`**. Drop it so the
+> child falls back to your `claude login`:
+> ```
+> env -u ANTHROPIC_API_KEY kagura-engineer run 42
+> ```
+
 ---
 
 ## Project layout
