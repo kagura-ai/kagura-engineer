@@ -20,9 +20,10 @@ chain and a `setup` that resolves it.
 | **Plan 1** | `doctor` — diagnose the dependency chain | ✅ shipped |
 | **Plan 2** | `setup` — install + bootstrap the environment | ✅ shipped |
 | **Plan 3** | `run` — memory-grounded agent loop (issue→PR) | ✅ done |
-| Plan 4+ | review gate, memory auto-store, worktree runs | 📋 planned |
+| **Plan 4** | `review` — launch the reviewer, gate on its JSON verdict | ✅ done (v1) |
+| Plan 4b+ | auto-review/fix loop, memory auto-store, worktree runs | 📋 planned |
 
-`doctor`, `setup`, and `run` are runnable now (243 tests green).
+`doctor`, `setup`, `run`, and `review` are runnable now (289 tests green).
 
 ---
 
@@ -147,6 +148,26 @@ kagura-engineer run 42 --json
 
 Exit codes: `0` PR reached · `1` hard fail · `2` blocked (guard or gate
 halt — resumable by re-running).
+
+### `kagura-engineer review`
+
+Launches the separate [`kagura-code-reviewer`](https://github.com/kagura-ai/kagura-code-reviewer)
+on a PR or branch, reads its machine-readable JSON envelope (never scrapes
+Markdown), and gates on the `verdict`. Recalled memory is passed to the
+reviewer as an untrusted, reference-only `--context-file`; the raw report is
+written to `.kagura/review.json` so you can read the full findings. This is
+v1 (review + gate) — the auto-review/fix loop is a later plan.
+
+```
+kagura-engineer review                 # review HEAD against main
+kagura-engineer review feat/x          # review a branch
+kagura-engineer review 42              # review PR #42 (resolved to its branch)
+kagura-engineer review --base develop  # diff against a different base
+kagura-engineer review --json          # machine-readable report
+```
+
+Exit codes: `0` green/yellow (or nothing to review) · `1` could not review
+(reviewer infra error) · `2` red (blocking findings — resumable).
 
 ---
 

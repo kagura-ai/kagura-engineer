@@ -2,6 +2,8 @@ from typer.testing import CliRunner
 
 from kagura_engineer.cli import app
 from kagura_engineer.doctor.result import CheckResult, Status
+from kagura_engineer.review.envelope import ReviewEnvelope
+from kagura_engineer.review.reviewer import ReviewerResult
 from kagura_engineer.setup.result import SetupReport, StepResult, StepStatus
 
 runner = CliRunner()
@@ -257,3 +259,78 @@ def test_doctor_malformed_yaml_clean_error(tmp_path):
     result = runner.invoke(app, ["doctor", "--config", str(bad)])
     assert result.exit_code == 2
     assert "config" in result.output.lower() or "yaml" in result.output.lower()
+
+
+# --- review: exit code + JSON contract -------------------------------------
+
+
+def _write_cfg_review(tmp_path):
+    cfg = tmp_path / "repo.yaml"
+    cfg.write_text(
+        "profile: test\n"
+        "memory_cloud_url: http://x\n"
+        "workspace_id: w\n"
+        "context_id: c\n"
+    )
+    return cfg
+
+
+def test_review_green_exits_0(monkeypatch, tmp_path):
+    import kagura_engineer.review as pkg
+    monkeypatch.setattr(pkg, "resolve_head", lambda t: t, raising=True)
+    monkeypatch.setattr(
+        pkg, "run_reviewer",
+        lambda **kw: ReviewerResult(0, "", "", ReviewEnvelope(parsed=True, verdict="green")),
+        raising=True,
+    )
+
+    class _Mem:
+        def load_pinned(self, c): return []
+        def recall(self, c, q, *, k=5): return []
+    monkeypatch.setattr(pkg.KaguraCloudClient, "from_config", classmethod(lambda cls, cfg: _Mem()))
+
+    cfg = _write_cfg_review(tmp_path)
+    result = runner.invoke(app, ["review", "HEAD", "-c", str(cfg)])
+    assert result.exit_code == 0
+
+
+def test_review_red_exits_2(monkeypatch, tmp_path):
+    import kagura_engineer.review as pkg
+    monkeypatch.setattr(pkg, "resolve_head", lambda t: t, raising=True)
+    env = ReviewEnvelope(parsed=True, verdict="red", summary={"blocking": 1})
+    monkeypatch.setattr(pkg, "run_reviewer", lambda **kw: ReviewerResult(1, "", "", env), raising=True)
+
+    class _Mem:
+        def load_pinned(self, c): return []
+        def recall(self, c, q, *, k=5): return []
+    monkeypatch.setattr(pkg.KaguraCloudClient, "from_config", classmethod(lambda cls, cfg: _Mem()))
+
+    cfg = _write_cfg_review(tmp_path)
+    result = runner.invoke(app, ["review", "HEAD", "-c", str(cfg)])
+    assert result.exit_code == 2
+
+
+def test_review_bad_config_exits_2(tmp_path):
+    result = runner.invoke(app, ["review", "HEAD", "-c", str(tmp_path / "nope.yaml")])
+    assert result.exit_code == 2
+
+
+def test_review_json_flag_emits_json(monkeypatch, tmp_path):
+    import json as _json
+    import kagura_engineer.review as pkg
+    monkeypatch.setattr(pkg, "resolve_head", lambda t: t, raising=True)
+    monkeypatch.setattr(
+        pkg, "run_reviewer",
+        lambda **kw: ReviewerResult(0, "", "", ReviewEnvelope(parsed=True, verdict="green")),
+        raising=True,
+    )
+
+    class _Mem:
+        def load_pinned(self, c): return []
+        def recall(self, c, q, *, k=5): return []
+    monkeypatch.setattr(pkg.KaguraCloudClient, "from_config", classmethod(lambda cls, cfg: _Mem()))
+
+    cfg = _write_cfg_review(tmp_path)
+    result = runner.invoke(app, ["review", "HEAD", "-c", str(cfg), "--json"])
+    assert result.exit_code == 0
+    assert _json.loads(result.stdout)["verdict"] == "green"
