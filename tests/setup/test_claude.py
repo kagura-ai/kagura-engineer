@@ -77,9 +77,10 @@ def test_claude_present_without_auth_no_input_fails_loud(monkeypatch, tmp_path):
 # --- not installed: try to install --------------------------------------
 
 
-def test_claude_not_present_no_installer_needed_in_dry_run(monkeypatch, tmp_path):
-    # dry-run must NEVER actually download. We assert subprocess.run is
-    # not called regardless of curl availability.
+def test_claude_not_present_dry_run_predicts_needs_user_when_no_auth(monkeypatch, tmp_path):
+    # dry-run must NEVER download (no subprocess), but it must predict the
+    # real outcome: with no auth source, a real run would land in NEEDS_USER
+    # (login required), so the preview must too — not a misleading OK.
     monkeypatch.setattr(claude_setup.shutil, "which", lambda n: None)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setattr(auth_module.Path, "home", classmethod(lambda cls: tmp_path))
@@ -90,10 +91,25 @@ def test_claude_not_present_no_installer_needed_in_dry_run(monkeypatch, tmp_path
     monkeypatch.setattr(claude_setup.subprocess, "run", _must_not_run)
 
     r = ensure_claude_login(no_input=False, dry_run=True)
-    # dry-run on the not-installed case is OK (preview) — the user
-    # asked for a preview, not an action.
+    assert r.status is StepStatus.NEEDS_USER
+    assert "would" in r.detail.lower() or "dry-run" in r.detail.lower()
+
+
+def test_claude_not_present_dry_run_ok_when_auth_present(monkeypatch, tmp_path):
+    # dry-run with auth already present: a real run would install then
+    # succeed, so the preview is OK.
+    monkeypatch.setattr(claude_setup.shutil, "which", lambda n: None)
+    monkeypatch.setattr(os, "environ", {"ANTHROPIC_API_KEY": "sk-ant-test"}, raising=False)
+    monkeypatch.setattr(auth_module.Path, "home", classmethod(lambda cls: tmp_path))
+
+    def _must_not_run(*a, **k):
+        raise AssertionError("dry-run must not invoke subprocess")
+
+    monkeypatch.setattr(claude_setup.subprocess, "run", _must_not_run)
+
+    r = ensure_claude_login(no_input=True, dry_run=True)
     assert r.status is StepStatus.OK
-    assert "would" in r.detail.lower() or "preview" in r.detail.lower()
+    assert "would" in r.detail.lower() or "dry-run" in r.detail.lower()
 
 
 def test_claude_not_present_no_curl_needs_user(monkeypatch, tmp_path):

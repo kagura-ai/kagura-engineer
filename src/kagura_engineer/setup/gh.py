@@ -86,7 +86,21 @@ def ensure_gh_auth(
                 f"using {env_var} env (token passthrough)",
                 duration_s=time.monotonic() - started,
             )
-        # 1b. Live auth status check.
+        # 1b. Dry-run: a preview executes nothing. We can't confirm auth
+        # without running `gh auth status`, so report it as a step that
+        # would be verified — and never hard-FAIL under --no-input here.
+        if dry_run:
+            return StepResult(
+                name,
+                StepStatus.NEEDS_USER,
+                "dry-run: gh on PATH; would verify `gh auth status` (and prompt login if unauthenticated)",
+                fix_hint=(
+                    "run setup without --dry-run to verify; set GITHUB_TOKEN=ghp_... "
+                    "for token passthrough"
+                ),
+                duration_s=time.monotonic() - started,
+            )
+        # 1c. Live auth status check.
         try:
             proc = _run_gh_status()
         except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired) as exc:

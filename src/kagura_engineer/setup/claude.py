@@ -100,37 +100,38 @@ def ensure_claude_login(*, no_input: bool, dry_run: bool) -> StepResult:
     name = "claude-code"
     started = time.monotonic()
 
-    # If claude is already on PATH, we still need to verify auth —
-    # the binary being present does not mean a login has happened.
+    # If claude is already on PATH, we still need to verify auth — the
+    # binary being present does not mean a login has happened. The install
+    # half runs (or is previewed) first; the auth check below is shared
+    # between dry-run and real runs so the preview predicts the real outcome
+    # (e.g. "would install, then still need a login" -> NEEDS_USER, not OK).
+    install_note = None
     if shutil.which("claude") is None:
         if dry_run:
-            return StepResult(
-                name,
-                StepStatus.OK,
-                f"dry-run: would run `curl -fsSL {INSTALL_URL} | bash` then prompt for login",
-                duration_s=time.monotonic() - started,
-            )
-        install_result = _install_claude()
-        if install_result is not None:
-            return install_result
-        # Install succeeded; re-check PATH.
-        if shutil.which("claude") is None:
-            return StepResult(
-                name,
-                StepStatus.FAIL,
-                "install command exited 0 but `claude` is still not on PATH",
-                fix_hint="open a new shell so PATH is refreshed, then re-run setup",
-                duration_s=time.monotonic() - started,
-            )
+            install_note = f"dry-run: would run `curl -fsSL {INSTALL_URL} | bash`"
+        else:
+            install_result = _install_claude()
+            if install_result is not None:
+                return install_result
+            # Install succeeded; re-check PATH.
+            if shutil.which("claude") is None:
+                return StepResult(
+                    name,
+                    StepStatus.FAIL,
+                    "install command exited 0 but `claude` is still not on PATH",
+                    fix_hint="open a new shell so PATH is refreshed, then re-run setup",
+                    duration_s=time.monotonic() - started,
+                )
 
-    # Auth check (shared with doctor).
+    # Auth check (shared with doctor; pure, no binary required).
+    prefix = f"{install_note}; " if install_note else ""
     res = resolve_anthropic_auth()
     if res.method is AuthMethod.NONE:
         if no_input:
             return StepResult(
                 name,
                 StepStatus.FAIL,
-                "no auth source and --no-input refuses to prompt",
+                f"{prefix}no auth source and --no-input refuses to prompt",
                 fix_hint=(
                     "either export ANTHROPIC_API_KEY=... or drop --no-input "
                     "and run `claude` once interactively to bootstrap a subscription login"
@@ -140,7 +141,7 @@ def ensure_claude_login(*, no_input: bool, dry_run: bool) -> StepResult:
         return StepResult(
             name,
             StepStatus.NEEDS_USER,
-            "claude installed but no auth source (env var or credential cache)",
+            f"{prefix}claude installed but no auth source (env var or credential cache)",
             fix_hint=(
                 "run `claude` once interactively to establish a subscription login, "
                 "or export ANTHROPIC_API_KEY=... before re-running setup"
@@ -153,4 +154,4 @@ def ensure_claude_login(*, no_input: bool, dry_run: bool) -> StepResult:
         detail = "ANTHROPIC_API_KEY set"
     else:
         detail = res.detail  # subscription cache detail (with kind label)
-    return StepResult(name, StepStatus.OK, detail, duration_s=time.monotonic() - started)
+    return StepResult(name, StepStatus.OK, f"{prefix}{detail}", duration_s=time.monotonic() - started)

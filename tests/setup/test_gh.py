@@ -191,6 +191,40 @@ def test_gh_not_present_apt_install(monkeypatch):
 # --- dry-run ------------------------------------------------------------
 
 
+def test_gh_dry_run_installed_does_not_run_status(monkeypatch):
+    # When gh is already on PATH, --dry-run must NOT execute `gh auth status`
+    # (a preview executes nothing) and must NOT hard-FAIL under --no-input;
+    # it reports a feasibility preview (NEEDS_USER) instead.
+    monkeypatch.setattr(gh_setup.shutil, "which", lambda n: "/usr/bin/gh" if n == "gh" else None)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+
+    def _must_not_run(*a, **k):
+        raise AssertionError("dry-run must not invoke gh auth status")
+
+    monkeypatch.setattr(gh_setup.subprocess, "run", _must_not_run)
+
+    r = ensure_gh_auth(PlatformInfo(OSKind.LINUX, PkgManagerKind.APT, is_wsl=False, has_sudo=True),
+                       no_input=True, dry_run=True)
+    assert r.status is StepStatus.NEEDS_USER
+    assert "would" in r.detail.lower() or "dry-run" in r.detail.lower()
+
+
+def test_gh_dry_run_installed_with_token_is_ok(monkeypatch):
+    # Token passthrough is a pure signal; dry-run can report OK without
+    # running any subprocess.
+    monkeypatch.setattr(gh_setup.shutil, "which", lambda n: "/usr/bin/gh" if n == "gh" else None)
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_fake")
+
+    def _must_not_run(*a, **k):
+        raise AssertionError("dry-run must not invoke subprocess")
+
+    monkeypatch.setattr(gh_setup.subprocess, "run", _must_not_run)
+    r = ensure_gh_auth(PlatformInfo(OSKind.LINUX, PkgManagerKind.APT, is_wsl=False, has_sudo=True),
+                       no_input=True, dry_run=True)
+    assert r.status is StepStatus.OK
+
+
 def test_gh_dry_run_does_not_install(monkeypatch):
     monkeypatch.setattr(gh_setup.shutil, "which", lambda n: None)
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
