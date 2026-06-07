@@ -7,6 +7,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 from ..setup.auth import AuthMethod, resolve_anthropic_auth
 from ..setup.ollama import model_present
@@ -211,3 +212,24 @@ def check_memory_cloud(base_url: str) -> CheckResult:
             "check config.memory_cloud_url / network",
         )
     return CheckResult("memory-cloud", Status.OK, f"reachable at {host_only}")
+
+
+def check_gh_issue_driven() -> CheckResult:
+    """Verify the gh-issue-driven plugin is installed.
+
+    `run` (Plan 3) drives gh-issue-driven via headless claude; without the
+    plugin the run would die deep inside a session. This is a blocking
+    check (Status.FAIL ⇒ CheckResult.is_blocking), so `run`'s guard can
+    refuse to start. Plugin root is overridable via KAGURA_PLUGINS_DIR
+    for tests.
+    """
+    root = Path(os.environ.get("KAGURA_PLUGINS_DIR", Path.home() / ".claude" / "plugins"))
+    hits = [p for p in root.glob("**/gh-issue-driven") if p.is_dir()] if root.exists() else []
+    if hits:
+        return CheckResult("gh-issue-driven", Status.OK, "plugin installed")
+    return CheckResult(
+        "gh-issue-driven",
+        Status.FAIL,
+        "gh-issue-driven plugin not found",
+        "install the gh-issue-driven Claude Code plugin (run requires it)",
+    )
