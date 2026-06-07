@@ -14,7 +14,7 @@ narrow means tests use an in-memory fake and never touch the network.
 from __future__ import annotations
 
 import os
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from ..config import Config
 
@@ -40,7 +40,7 @@ _TRUST_FILTER = {"trust_tier": "trusted"}
 class KaguraCloudClient:
     """Adapter over `kagura_memory.KaguraClient`."""
 
-    def __init__(self, sdk) -> None:
+    def __init__(self, sdk: Any) -> None:
         self._sdk = sdk
 
     @classmethod

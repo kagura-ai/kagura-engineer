@@ -63,3 +63,11 @@ def test_set_state_passes_value():
 def test_kagura_cloud_client_satisfies_protocol():
     client: MemoryClient = KaguraCloudClient(_FakeSDK())
     assert isinstance(client, MemoryClient)  # runtime_checkable
+
+
+def test_get_state_returns_none_when_missing():
+    class _MissingSDK:
+        def get_state(self, ctx, key):
+            return None
+
+    assert KaguraCloudClient(_MissingSDK()).get_state("ctx", "k") is None
