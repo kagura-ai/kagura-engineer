@@ -71,3 +71,40 @@ def test_get_state_returns_none_when_missing():
             return None
 
     assert KaguraCloudClient(_MissingSDK()).get_state("ctx", "k") is None
+
+
+# --- Plan 5: backend factory ----------------------------------------------
+
+
+def _cfg_backend(backend, tmp_path):
+    from kagura_engineer.config import Config
+    return Config(profile="t", memory_cloud_url="http://x", workspace_id="w",
+                  context_id="c", memory_backend=backend,
+                  local_memory_path=str(tmp_path / "mem.db"))
+
+
+def test_resolve_memory_client_local(tmp_path):
+    from kagura_engineer.run.memory import resolve_memory_client
+    from kagura_engineer.run.local_memory import LocalMemoryClient
+    client = resolve_memory_client(_cfg_backend("local", tmp_path))
+    assert isinstance(client, LocalMemoryClient)
+
+
+def test_resolve_memory_client_cloud(monkeypatch, tmp_path):
+    from kagura_engineer.run import memory as mem_mod
+    sentinel = object()
+    monkeypatch.setattr(mem_mod.KaguraCloudClient, "from_config",
+                        classmethod(lambda cls, cfg: sentinel))
+    assert mem_mod.resolve_memory_client(_cfg_backend("cloud", tmp_path)) is sentinel
+
+
+def test_invalid_memory_backend_raises_config_error(tmp_path):
+    import pytest
+    from kagura_engineer.config import ConfigError, load_config
+    cfg = tmp_path / "repo.yaml"
+    cfg.write_text(
+        "profile: t\nmemory_cloud_url: http://x\nworkspace_id: w\n"
+        "context_id: c\nmemory_backend: bogus\n"
+    )
+    with pytest.raises(ConfigError):
+        load_config(str(cfg))

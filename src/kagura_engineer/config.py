@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, Field, ValidationError
@@ -25,6 +26,10 @@ class Config(BaseModel):
     context_id: str
     ollama_url: str = "http://localhost:11434"
     review: ReviewConfig = Field(default_factory=ReviewConfig)
+    # Memory backend: "cloud" (Kagura Memory Cloud SDK) or "local" (offline
+    # SQLite, no API key). `local_memory_path` is used only when backend=local.
+    memory_backend: Literal["cloud", "local"] = "cloud"
+    local_memory_path: str = ".kagura/memory.db"
 
 
 def load_config(path: str | Path) -> Config:
