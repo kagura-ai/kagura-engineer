@@ -9,6 +9,9 @@ from .doctor.result import Status
 from .run import STATUS_EXIT, run_idea
 from .run.render import print_table as run_print_table
 from .run.render import to_json as run_to_json
+from .review import REVIEW_STATUS_EXIT, review_pr
+from .review.render import print_table as review_print_table
+from .review.render import to_json as review_to_json
 from .setup import STEP_NAMES, build_plan, run_plan
 from .setup.render import print_table as setup_print_table
 from .setup.render import to_json as setup_to_json
@@ -147,6 +150,39 @@ def run(
         run_print_table(report)
 
     raise typer.Exit(code=STATUS_EXIT[report.status])
+
+
+# ---------------------------------------------------------------------------
+# review (Plan 4 — reviewer 連結, v1: review + gate)
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def review(
+    target: str = typer.Argument("HEAD", help="git ref, branch, or PR number to review as head"),
+    base: str = typer.Option("main", "--base", help="base ref to diff against"),
+    config: str = _CONFIG_OPT,
+    json_out: bool = typer.Option(False, "--json"),
+) -> None:
+    """Launch kagura-code-reviewer on a PR/branch and gate on its JSON verdict.
+
+    Exit codes: 0 = green/yellow (or nothing to review) · 1 = could not
+    review (reviewer infra error) · 2 = red (blocking findings — resumable).
+    """
+    try:
+        cfg = load_config(config)
+    except ConfigError as exc:
+        typer.echo(f"review: invalid config '{config}': {exc}", err=True)
+        raise typer.Exit(code=2)
+
+    report = review_pr(cfg, target, base=base)
+
+    if json_out:
+        typer.echo(review_to_json(report))
+    else:
+        review_print_table(report)
+
+    raise typer.Exit(code=REVIEW_STATUS_EXIT[report.status])
 
 
 if __name__ == "__main__":
