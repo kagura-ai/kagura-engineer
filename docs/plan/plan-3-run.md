@@ -48,7 +48,8 @@
 
 | 項目 | 行き先 |
 |---|---|
-| standalone reviewer(`kagura-code-reviewer`)連結・auto-review/auto-fix loop | Plan 4 |
+| standalone reviewer(`kagura-code-reviewer`)連結(review + gate) | Plan 4 ✅(v1 done) |
+| auto-review/auto-fix loop(red → claude -p fix → re-review) | Plan 4b / 後続 |
 | `/gh-issue-driven:goal`(milestone 丸ごと多 issue 自律) | v0.3 / 後続 |
 | `--unattended`(HITL ダイヤルを OFF 方向へ) | 後続 |
 | `LocalMemoryClient`(SQLite offline) | Plan 5 |
