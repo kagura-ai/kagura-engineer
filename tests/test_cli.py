@@ -334,3 +334,68 @@ def test_review_json_flag_emits_json(monkeypatch, tmp_path):
     result = runner.invoke(app, ["review", "HEAD", "-c", str(cfg), "--json"])
     assert result.exit_code == 0
     assert _json.loads(result.stdout)["verdict"] == "green"
+
+
+# --- review --fix: Plan 4b auto-fix loop -----------------------------------
+
+
+def _patch_loop_mem(monkeypatch):
+    import kagura_engineer.review.loop as lp
+
+    class _Mem:
+        def load_pinned(self, c): return []
+        def recall(self, c, q, *, k=5): return []
+    monkeypatch.setattr(lp.KaguraCloudClient, "from_config",
+                        classmethod(lambda cls, cfg: _Mem()), raising=True)
+
+
+def _loop_review(monkeypatch, statuses):
+    import kagura_engineer.review.loop as lp
+    from kagura_engineer.review.result import ReviewReport
+    it = iter(statuses)
+    monkeypatch.setattr(
+        lp, "review_pr",
+        lambda *a, **kw: ReviewReport(target="HEAD", base="main", status=next(it),
+                                      verdict="red", report_path="/tmp/r.json"),
+        raising=True,
+    )
+
+
+def test_review_fix_green_after_fix_exits_0(monkeypatch, tmp_path):
+    import kagura_engineer.review.loop as lp
+    from kagura_engineer.review.fixer import FixerResult
+    from kagura_engineer.review.result import ReviewStatus
+    _patch_loop_mem(monkeypatch)
+    _loop_review(monkeypatch, [ReviewStatus.BLOCKED, ReviewStatus.OK])
+    monkeypatch.setattr(lp, "run_fixer", lambda repo, prompt, **kw: FixerResult(0, "fixed", ""), raising=True)
+    cfg = _write_cfg_review(tmp_path)
+    result = runner.invoke(app, ["review", "HEAD", "-c", str(cfg), "--fix"])
+    assert result.exit_code == 0
+
+
+def test_review_fix_still_red_exits_2(monkeypatch, tmp_path):
+    import kagura_engineer.review.loop as lp
+    from kagura_engineer.review.fixer import FixerResult
+    from kagura_engineer.review.result import ReviewStatus
+    _patch_loop_mem(monkeypatch)
+    _loop_review(monkeypatch, [ReviewStatus.BLOCKED] * 10)
+    monkeypatch.setattr(lp, "run_fixer", lambda repo, prompt, **kw: FixerResult(0, "", ""), raising=True)
+    cfg = _write_cfg_review(tmp_path)
+    result = runner.invoke(app, ["review", "HEAD", "-c", str(cfg), "--fix"])
+    assert result.exit_code == 2
+
+
+def test_review_fix_json_emits_iterations(monkeypatch, tmp_path):
+    import json as _json
+    import kagura_engineer.review.loop as lp
+    from kagura_engineer.review.fixer import FixerResult
+    from kagura_engineer.review.result import ReviewStatus
+    _patch_loop_mem(monkeypatch)
+    _loop_review(monkeypatch, [ReviewStatus.BLOCKED, ReviewStatus.OK])
+    monkeypatch.setattr(lp, "run_fixer", lambda repo, prompt, **kw: FixerResult(0, "", ""), raising=True)
+    cfg = _write_cfg_review(tmp_path)
+    result = runner.invoke(app, ["review", "HEAD", "-c", str(cfg), "--fix", "--json"])
+    assert result.exit_code == 0
+    data = _json.loads(result.stdout)
+    assert data["fixes_attempted"] == 1
+    assert len(data["iterations"]) == 2
