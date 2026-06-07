@@ -1,0 +1,107 @@
+from pathlib import Path
+
+from kagura_engineer.doctor.result import CheckResult, Status
+from kagura_engineer.run import run_idea, STATUS_EXIT
+from kagura_engineer.run.result import RunStatus
+from kagura_engineer.run.workflow import PhaseInvocation
+from tests._constants import (
+    VALID_CONTEXT_UUID, VALID_MEMORY_URL, VALID_PROFILE, VALID_WORKSPACE,
+)
+from kagura_engineer.config import Config
+
+
+def _cfg() -> Config:
+    return Config(
+        profile=VALID_PROFILE, memory_cloud_url=VALID_MEMORY_URL,
+        workspace_id=VALID_WORKSPACE, context_id=VALID_CONTEXT_UUID,
+    )
+
+
+class _FakeMemory:
+    def __init__(self):
+        self.state = {}
+        self.remembered = []
+
+    def load_pinned(self, context_id): return ["guardrail: TDD"]
+    def recall(self, context_id, query, *, k=5): return ["decision A"]
+    def remember(self, context_id, *, summary, content, type, tags=None):
+        self.remembered.append((type, summary)); return "mem-1"
+    def get_state(self, context_id, key): return self.state.get(key)
+    def set_state(self, context_id, key, value): self.state[key] = value
+
+
+def _patch_boundaries(monkeypatch, *, blocking=False, phases=None):
+    """Patch guard/worktree/workflow. `phases` maps phase->PhaseInvocation."""
+    checks = [CheckResult("gh-issue-driven", Status.FAIL if blocking else Status.OK, "x")]
+    monkeypatch.setattr("kagura_engineer.run.run_all", lambda cfg: checks)
+    monkeypatch.setattr("kagura_engineer.run.ensure_worktree", lambda root, issue, base="HEAD": Path(f"/wt/run-{issue}"))
+    phases = phases or {}
+
+    def _invoke(phase, issue, worktree, grounding, **kw):
+        return phases[phase]
+
+    monkeypatch.setattr("kagura_engineer.run.invoke_phase", _invoke)
+
+
+def test_status_exit_map():
+    assert STATUS_EXIT[RunStatus.OK] == 0
+    assert STATUS_EXIT[RunStatus.FAIL] == 1
+    assert STATUS_EXIT[RunStatus.BLOCKED] == 2
+
+
+def test_guard_blocks_when_doctor_has_blocking_fail(monkeypatch):
+    _patch_boundaries(monkeypatch, blocking=True)
+    mem = _FakeMemory()
+    report = run_idea(_cfg(), 42, memory=mem, repo_root=Path("/repo"))
+    assert report.status is RunStatus.BLOCKED
+    assert report.phases[0].name == "guard"
+    assert "setup" in report.resume_hint.lower()
+    assert mem.remembered == []  # never got to act/persist
+
+
+def test_happy_path_reaches_pr_and_persists(monkeypatch):
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+    mem = _FakeMemory()
+    report = run_idea(_cfg(), 42, memory=mem, repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK
+    assert report.pr_url == "https://x/pull/9"
+    assert [p.name for p in report.phases] == ["guard", "recall", "worktree", "start", "ship", "persist"]
+    assert any(t == "savepoint" for t, _ in mem.remembered)
+    assert mem.state.get("run:42") is not None  # resume marker set to done
+
+
+def test_red_verdict_at_start_halts_and_sets_resume(monkeypatch):
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "red", None),
+    })
+    mem = _FakeMemory()
+    report = run_idea(_cfg(), 42, memory=mem, repo_root=Path("/repo"))
+    assert report.status is RunStatus.BLOCKED
+    assert report.phases[-1].name == "start"
+    assert report.phases[-1].verdict == "red"
+    assert mem.state.get("run:42") is not None  # resume state persisted
+    assert "run 42" in report.resume_hint
+
+
+def test_phase_nonzero_returncode_is_fail(monkeypatch):
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 1, "", "boom", None, None),
+    })
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.FAIL
+    assert report.phases[-1].name == "start"
+
+
+def test_no_remember_skips_persist(monkeypatch):
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+    mem = _FakeMemory()
+    report = run_idea(_cfg(), 42, memory=mem, no_remember=True, repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK
+    assert mem.remembered == []  # recall still happened, persist skipped
+    assert "persist" not in [p.name for p in report.phases]
