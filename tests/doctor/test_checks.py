@@ -331,3 +331,24 @@ def test_memory_cloud_warn_on_http_error(monkeypatch):
     r = checks.check_memory_cloud("https://memory.kagura-ai.com")
     assert r.status is Status.WARN
     assert "403" in r.detail
+
+
+def test_check_gh_issue_driven_ok_when_plugin_present(tmp_path, monkeypatch):
+    from kagura_engineer.doctor import checks
+    from kagura_engineer.doctor.result import Status
+
+    plugins = tmp_path / "plugins"
+    (plugins / "cache" / "gh-issue-driven" / "gh-issue-driven" / "0.13.0" / "commands").mkdir(parents=True)
+    monkeypatch.setenv("KAGURA_PLUGINS_DIR", str(plugins))
+    res = checks.check_gh_issue_driven()
+    assert res.status is Status.OK
+
+
+def test_check_gh_issue_driven_fail_when_absent(tmp_path, monkeypatch):
+    from kagura_engineer.doctor import checks
+    from kagura_engineer.doctor.result import Status
+
+    monkeypatch.setenv("KAGURA_PLUGINS_DIR", str(tmp_path / "empty"))
+    res = checks.check_gh_issue_driven()
+    assert res.status is Status.FAIL
+    assert res.is_blocking is True  # FAIL ⇒ blocking; run guard refuses to start

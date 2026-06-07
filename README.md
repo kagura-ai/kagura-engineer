@@ -19,10 +19,10 @@ chain and a `setup` that resolves it.
 |---|---|---|
 | **Plan 1** | `doctor` — diagnose the dependency chain | ✅ shipped |
 | **Plan 2** | `setup` — install + bootstrap the environment | ✅ shipped |
-| **Plan 3** | `run` — the idea-mode / task pipeline | 🚧 in design |
+| **Plan 3** | `run` — memory-grounded agent loop (issue→PR) | ✅ done |
 | Plan 4+ | review gate, memory auto-store, worktree runs | 📋 planned |
 
-`doctor` and `setup` are runnable now (186 tests green). `run` is a stub.
+`doctor`, `setup`, and `run` are runnable now (243 tests green).
 
 ---
 
@@ -134,8 +134,19 @@ Valid `--fix` targets: `git`, `claude-code`, `gh`, `ollama`, `ollama-models`,
 
 ### `kagura-engineer run`
 
-The idea-mode pipeline. **Not implemented yet (Plan 3)** — currently prints a
-notice and exits 2.
+The memory-grounded agent loop. `run <issue#>` verifies the environment,
+recalls relevant memory, isolates a worktree, drives `gh-issue-driven`
+start→ship via headless `claude -p` (HITL gate on red/unknown verdicts),
+and opens a PR — persisting a savepoint to Memory Cloud.
+
+```
+kagura-engineer run 42                 # drive issue #42 to a PR
+kagura-engineer run 42 --no-remember   # recall but don't persist
+kagura-engineer run 42 --json
+```
+
+Exit codes: `0` PR reached · `1` hard fail · `2` blocked (guard or gate
+halt — resumable by re-running).
 
 ---
 
@@ -171,7 +182,7 @@ kagura-engineer/
 
 ```bash
 pip install -e ".[dev]"
-pytest                         # 186 tests
+pytest                         # 243 tests
 ```
 
 `pyproject.toml` sets `pythonpath = ["src"]`, so `import kagura_engineer`

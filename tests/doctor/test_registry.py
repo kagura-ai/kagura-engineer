@@ -18,6 +18,7 @@ def test_run_all_invokes_every_check(monkeypatch, valid_config):
     monkeypatch.setattr(registry.checks, "check_ollama", _stub("ollama"))
     monkeypatch.setattr(registry.checks, "check_haiku", _stub("haiku"))
     monkeypatch.setattr(registry.checks, "check_memory_cloud", _stub("memory-cloud"))
+    monkeypatch.setattr(registry.checks, "check_gh_issue_driven", _stub("gh-issue-driven"))
 
     results = registry.run_all(valid_config)
     assert {r.name for r in results} == {
@@ -27,8 +28,9 @@ def test_run_all_invokes_every_check(monkeypatch, valid_config):
         "ollama",
         "haiku",
         "memory-cloud",
+        "gh-issue-driven",
     }
-    assert len(calls) == 6
+    assert len(calls) == 7
 
 
 def test_overall_status_is_worst():
@@ -80,6 +82,11 @@ def test_run_all_isolates_check_exceptions(monkeypatch, valid_config):
         "check_memory_cloud",
         lambda *a, **k: CheckResult("memory-cloud", Status.OK, "ok"),
     )
+    monkeypatch.setattr(
+        registry.checks,
+        "check_gh_issue_driven",
+        lambda: CheckResult("gh-issue-driven", Status.OK, "ok"),
+    )
 
     results = registry.run_all(valid_config)
     by_name = {r.name: r for r in results}
@@ -94,6 +101,7 @@ def test_run_all_isolates_check_exceptions(monkeypatch, valid_config):
         "ollama",
         "haiku",
         "memory-cloud",
+        "gh-issue-driven",
     }
     assert all(
         by_name[n].status is Status.OK for n in by_name if n != "git"

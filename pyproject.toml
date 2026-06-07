@@ -14,6 +14,7 @@ dependencies = [
     "rich>=13.7",
     "pydantic>=2.7",
     "pyyaml>=6.0",
+    "kagura-memory>=0.29",
 ]
 
 [project.optional-dependencies]
