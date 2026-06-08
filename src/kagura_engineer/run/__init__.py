@@ -137,7 +137,7 @@ def run_idea(
         )
 
     # Failover: replay any writes buffered during a prior Cloud outage before we
-    # start. hasattr-guarded (only FailoverMemoryClient has drain), and fully
+    # start. getattr-guarded (only FailoverMemoryClient has drain), and fully
     # best-effort — a drain failure must never fail the run; records stay in the
     # WAL for the next attempt.
     drainer = getattr(mem, "drain", None)

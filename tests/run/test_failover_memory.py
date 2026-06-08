@@ -250,7 +250,7 @@ def _cfg(**over):
     return Config(**base)
 
 
-def test_resolve_wraps_cloud_when_failover_on(tmp_path, monkeypatch):
+def test_resolve_wraps_cloud_when_failover_on(monkeypatch):
     from kagura_engineer.run import memory as mem_mod
     # Avoid importing the real SDK: stub the cloud client constructor.
     monkeypatch.setattr(mem_mod.KaguraCloudClient, "from_config",
@@ -259,7 +259,7 @@ def test_resolve_wraps_cloud_when_failover_on(tmp_path, monkeypatch):
     assert isinstance(client, FailoverMemoryClient)
 
 
-def test_resolve_bare_cloud_when_failover_off(tmp_path, monkeypatch):
+def test_resolve_bare_cloud_when_failover_off(monkeypatch):
     from kagura_engineer.run import memory as mem_mod
     fake = _FakeInner()
     monkeypatch.setattr(mem_mod.KaguraCloudClient, "from_config",
