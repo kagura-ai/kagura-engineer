@@ -21,10 +21,26 @@ the marker is absent. This is NOT a return to free-form output scraping: the
 token the c-suite reviewer skills emit and gh-issue-driven itself parses, so we
 read a shared verdict token, not arbitrary prose. The `KAGURA_VERDICT=` marker
 stays primary; the native line is consulted only on its absence; if neither is
-present the result is still None → halt. The fallback recognises green|yellow|
-red only — ship/gate2's `pass|fail` vocabulary is intentionally out of scope
-here (tracked separately) so this change rescues the `start`/gate1 path without
-silently reinterpreting gate2 verdicts.
+present the result is still None → halt.
+
+Phase-aware native vocabulary (issue #3). gate1/start closes with the
+green|yellow|red vocabulary; the ship phase's gate2 closes with `pass|fail`
+instead. So `parse_verdict` takes the `phase` and, for the ship phase only,
+additionally recognises native `## Verdict: pass`/`fail`, mapping pass→green
+(proceed) and fail→red (halt) onto the gate's verdict vocabulary. Advisor-only
+gate2 (the default) closes with green|yellow|red and keeps working unchanged.
+Every non-ship phase stays pass|fail-blind, so the mapping can never leak into
+gate1. The `KAGURA_VERDICT=` marker stays primary across all phases (it is
+always requested as green|yellow|red), so this only widens the secondary
+native-line fallback, never the marker contract.
+
+Deferred (issue #3 acceptance criterion 3): the `KAGURA_PR_URL=` marker-drop on
+ship is NOT given a native fallback here. There is no blessed secondary contract
+for a PR URL the way `## Verdict:` is for the verdict — scraping a URL out of
+free-form prose would be exactly the format-coupling this module avoids. A
+ship run that produces a PR but drops the marker reports pr_url=None; the gate
+still proceeds on the verdict, and `kagura-engineer run <issue>` is resumable.
+Revisit only if a structured PR-URL contract emerges upstream.
 
 Phases are separate `claude -p` calls because gh-issue-driven checkpoints
 to the branch + memory between phases, so each call resumes cleanly.
@@ -52,6 +68,19 @@ _PR_RE = re.compile(r"^KAGURA_PR_URL=(\S+)\s*$", re.MULTILINE)
 _NATIVE_VERDICT_RE = re.compile(
     r"^\s*##\s*Verdict:\s*(green|yellow|red)\b", re.MULTILINE | re.IGNORECASE
 )
+# Ship/gate2 closes with a different native vocabulary — `pass|fail` (issue #3).
+# For the ship phase the fallback also accepts those tokens (alongside the
+# advisor-only green|yellow|red), mapping pass→green / fail→red below. gate1
+# must stay pass|fail-blind, so this wider regex is consulted ONLY when
+# phase == "ship"; every other phase uses _NATIVE_VERDICT_RE above.
+_NATIVE_SHIP_VERDICT_RE = re.compile(
+    r"^\s*##\s*Verdict:\s*(green|yellow|red|pass|fail)\b",
+    re.MULTILINE | re.IGNORECASE,
+)
+# gate2's binary-gate tokens mapped onto the harness verdict vocabulary the gate
+# understands: pass → proceed (green), fail → halt (red). Advisor green|yellow|
+# red pass through unchanged.
+_SHIP_VERDICT_MAP = {"pass": "green", "fail": "red"}
 
 
 @dataclass(frozen=True)
@@ -99,11 +128,20 @@ def build_prompt(
     )
 
 
-def parse_verdict(text: str) -> str | None:
+def parse_verdict(text: str, phase: str | None = None) -> str | None:
     matches = _VERDICT_RE.findall(text or "")
     if matches:
         return matches[-1].lower()
     # Marker absent → fall back to the native `## Verdict:` line (issue #2).
+    # The ship phase additionally honours gate2's `pass|fail` vocabulary
+    # (issue #3), mapping pass→green / fail→red; every other phase stays
+    # green|yellow|red-only so the mapping cannot leak into gate1.
+    if phase == "ship":
+        native = _NATIVE_SHIP_VERDICT_RE.findall(text or "")
+        if not native:
+            return None
+        verdict = native[-1].lower()
+        return _SHIP_VERDICT_MAP.get(verdict, verdict)
     native = _NATIVE_VERDICT_RE.findall(text or "")
     return native[-1].lower() if native else None
 
@@ -140,5 +178,5 @@ def invoke_phase(
         )
     return PhaseInvocation(
         phase, proc.returncode, proc.stdout, proc.stderr,
-        parse_verdict(proc.stdout), parse_pr_url(proc.stdout),
+        parse_verdict(proc.stdout, phase), parse_pr_url(proc.stdout),
     )

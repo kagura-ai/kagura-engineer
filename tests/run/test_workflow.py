@@ -74,6 +74,67 @@ def test_parse_verdict_native_tolerates_leading_whitespace():
     assert workflow.parse_verdict("  ## Verdict: green") == "green"
 
 
+# --- ship/gate2 `pass|fail` native fallback (issue #3) ------------------------
+# Follow-up to #2: the native fallback for #2 recognised gate1's green|yellow|red
+# vocabulary only. The ship phase's gate2 closes with `pass|fail` instead, so a
+# ship `claude -p` body that drops the KAGURA_VERDICT= marker but ends in a
+# native `## Verdict: pass`/`fail` line still parsed to None → false-negative
+# halt. parse_verdict is now phase-aware: for phase="ship" it additionally maps
+# native pass→green (proceed) and fail→red (halt). gate1 stays pass|fail-blind.
+
+
+def test_parse_verdict_ship_native_pass_maps_to_green():
+    text = "audit complete...\n\n## Verdict: pass\n"
+    assert workflow.parse_verdict(text, phase="ship") == "green"
+
+
+def test_parse_verdict_ship_native_fail_maps_to_red():
+    text = "conformance failure...\n\n## Verdict: fail\n"
+    assert workflow.parse_verdict(text, phase="ship") == "red"
+
+
+def test_parse_verdict_ship_still_reads_green_yellow_red_native():
+    # Advisor-only gate2 (the default) closes with green|yellow|red — the ship
+    # phase must keep recognising those, not only pass|fail.
+    assert workflow.parse_verdict("## Verdict: yellow", phase="ship") == "yellow"
+
+
+def test_parse_verdict_ship_marker_still_wins_over_native():
+    # The KAGURA_VERDICT= marker stays primary even on the ship phase.
+    text = "KAGURA_VERDICT=green\nblah\n## Verdict: fail\n"
+    assert workflow.parse_verdict(text, phase="ship") == "green"
+
+
+def test_parse_verdict_ship_native_last_wins_across_vocabularies():
+    # A ship transcript can carry advisor green|yellow|red lines followed by the
+    # binary gate's pass|fail — the final native verdict line is the decision.
+    text = "## Verdict: green\n## Verdict: fail\n"
+    assert workflow.parse_verdict(text, phase="ship") == "red"
+
+
+def test_parse_verdict_gate1_does_not_leak_pass_fail():
+    # Acceptance criterion: the pass|fail mapping must NOT leak into gate1. A
+    # start-phase body whose only native line is `## Verdict: pass` halts.
+    assert workflow.parse_verdict("## Verdict: pass", phase="start") is None
+
+
+def test_parse_verdict_default_phase_is_pass_fail_blind():
+    # Backward-compat: callers that omit phase get the gate1 vocabulary, so the
+    # pre-#3 call sites and tests keep their exact behaviour.
+    assert workflow.parse_verdict("## Verdict: fail") is None
+
+
+def test_invoke_phase_ship_native_pass_resolves_to_green(monkeypatch, tmp_path):
+    # End-to-end: a ship phase that drops the marker but closes `## Verdict: pass`
+    # must resolve to a proceed verdict, not halt.
+    def _run(cmd, **kw):
+        return subprocess.CompletedProcess(cmd, 0, "gate2 done\n## Verdict: pass\n", "")
+
+    monkeypatch.setattr(workflow.subprocess, "run", _run)
+    inv = workflow.invoke_phase("ship", 3, tmp_path, [])
+    assert inv.verdict == "green"
+
+
 def test_parse_pr_url_reads_marker():
     assert workflow.parse_pr_url("KAGURA_PR_URL=https://github.com/o/r/pull/5\n") == "https://github.com/o/r/pull/5"
 
