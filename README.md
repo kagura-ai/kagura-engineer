@@ -107,10 +107,21 @@ Cloud-only fields may be omitted — an offline `repo.yaml` is just `profile` +
 `memory_backend: local`.
 
 **Memory backend.** Memory Cloud is the recommended default and is **free to
-start** — install the `kagura` CLI and run `kagura auth login` (both free) and
-`run`/`review` are grounded immediately. The richer capabilities — graph
-discovery, feedback reinforcement, Sleep consolidation, memory auto-store, and
-worktree runs (Plan 5+) — **require Memory Cloud**.
+start**. Authenticate with **either** of two equivalent credentials — `run`
+honours both, env-first:
+
+- `export KAGURA_API_KEY=...` — a workspace API key. Explicit and CI-friendly.
+- `kagura auth login` — installs the `kagura` CLI and writes an OAuth profile
+  to `~/.kagura/credentials.json`. Used automatically when `KAGURA_API_KEY` is
+  unset.
+
+When `KAGURA_API_KEY` is set it takes precedence; otherwise the `kagura auth
+login` profile is used. `doctor` and `setup` both check that one of these
+resolves and guide you if neither does — a reachable host with no credential is
+flagged, not silently passed. With a credential in place `run`/`review` are
+grounded immediately. The richer capabilities — graph discovery, feedback
+reinforcement, Sleep consolidation, memory auto-store, and worktree runs
+(Plan 5+) — **require Memory Cloud**.
 
 For offline or CI use, `memory_backend: local` switches the **basic** `run`/
 `review` grounding to an offline SQLite store (`local_memory_path`, stdlib

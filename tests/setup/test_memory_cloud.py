@@ -33,7 +33,12 @@ def test_ok_on_2xx(monkeypatch):
             return False
 
     monkeypatch.setattr(mc_setup.urllib.request, "urlopen", lambda *a, **k: _Resp())
-    r = ensure_memory_cloud_reachable("https://memory.kagura-ai.com", no_input=False, dry_run=False)
+    r = ensure_memory_cloud_reachable(
+        "https://memory.kagura-ai.com",
+        no_input=False,
+        dry_run=False,
+        env={"KAGURA_API_KEY": "kg"},
+    )
     assert r.status is StepStatus.OK
     assert "memory" in r.detail.lower() or "reachable" in r.detail.lower()
 
@@ -46,7 +51,12 @@ def test_ok_on_4xx(monkeypatch):
         raise urllib.error.HTTPError("https://memory.kagura-ai.com/health", 403, "Forbidden", {}, None)
 
     monkeypatch.setattr(mc_setup.urllib.request, "urlopen", _boom)
-    r = ensure_memory_cloud_reachable("https://memory.kagura-ai.com", no_input=False, dry_run=False)
+    r = ensure_memory_cloud_reachable(
+        "https://memory.kagura-ai.com",
+        no_input=False,
+        dry_run=False,
+        env={"KAGURA_API_KEY": "kg"},
+    )
     assert r.status is StepStatus.OK
     assert "403" in r.detail or "http" in r.detail.lower()
 
@@ -70,6 +80,77 @@ def test_dry_run_does_not_probe(monkeypatch):
     r = ensure_memory_cloud_reachable("https://memory.kagura-ai.com", no_input=False, dry_run=True)
     assert r.status is StepStatus.OK
     assert "would" in r.detail.lower() or "preview" in r.detail.lower()
+
+
+def test_needs_user_when_reachable_but_no_credential(monkeypatch, tmp_path):
+    # Reachable host + no KAGURA_API_KEY + no `kagura auth login` cache must
+    # NOT pass silently (issue #6): setup asks the user to authenticate.
+    class _Resp:
+        def read(self):
+            return b"{}"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(mc_setup.urllib.request, "urlopen", lambda *a, **k: _Resp())
+    r = ensure_memory_cloud_reachable(
+        "https://memory.kagura-ai.com",
+        no_input=False,
+        dry_run=False,
+        env={},
+        home=tmp_path,
+    )
+    assert r.status is StepStatus.NEEDS_USER
+    assert "KAGURA_API_KEY" in r.fix_hint
+    assert "kagura auth login" in r.fix_hint
+
+
+def test_needs_user_on_4xx_without_credential(monkeypatch, tmp_path):
+    def _boom(*a, **k):
+        raise urllib.error.HTTPError("https://memory.kagura-ai.com/health", 401, "Unauthorized", {}, None)
+
+    monkeypatch.setattr(mc_setup.urllib.request, "urlopen", _boom)
+    r = ensure_memory_cloud_reachable(
+        "https://memory.kagura-ai.com",
+        no_input=False,
+        dry_run=False,
+        env={},
+        home=tmp_path,
+    )
+    assert r.status is StepStatus.NEEDS_USER
+    assert "KAGURA_API_KEY" in r.fix_hint
+
+
+def test_oauth_login_cache_satisfies_credential(monkeypatch, tmp_path):
+    # `kagura auth login` profile present (no env key) → OK, not NEEDS_USER.
+    import json
+
+    cred = tmp_path / ".kagura" / "credentials.json"
+    cred.parent.mkdir(parents=True)
+    cred.write_text(json.dumps({"default_profile": "default", "profiles": {"default": {}}}))
+
+    class _Resp:
+        def read(self):
+            return b"{}"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(mc_setup.urllib.request, "urlopen", lambda *a, **k: _Resp())
+    r = ensure_memory_cloud_reachable(
+        "https://memory.kagura-ai.com",
+        no_input=False,
+        dry_run=False,
+        env={},
+        home=tmp_path,
+    )
+    assert r.status is StepStatus.OK
 
 
 def test_no_input_escalates_fail(monkeypatch):
