@@ -1,5 +1,4 @@
 import subprocess
-from pathlib import Path
 
 from kagura_engineer.run import workflow
 from kagura_engineer.run.workflow import PhaseInvocation
@@ -289,3 +288,49 @@ def test_invoke_phase_no_mcp_flags_by_default(monkeypatch, tmp_path):
     monkeypatch.setattr(workflow.subprocess, "run", _run)
     workflow.invoke_phase("ship", 2, tmp_path, [])
     assert "--mcp-config" not in cap["cmd"]
+
+
+# --- issue #9: the implement phase ----------------------------------------
+# There is no `/gh-issue-driven:implement` skill — the implement phase drives
+# implementation directly (TDD discipline + scope-based orchestration), so its
+# prompt must NOT invoke a non-existent slash command.
+
+
+def test_build_prompt_implement_drives_tdd_not_a_slash_command():
+    p = workflow.build_prompt("implement", 9, ["guardrail: TDD"])
+    assert "/gh-issue-driven:implement" not in p  # no such skill exists
+    assert "9" in p and "guardrail: TDD" in p     # issue + grounding present
+    low = p.lower()
+    assert "test" in low and "commit" in low       # test-first + must commit
+    assert "KAGURA_VERDICT=" in p                   # still emits the marker
+
+
+def test_build_prompt_implement_forwards_unattended_and_mcp():
+    p = workflow.build_prompt("implement", 1, [], unattended=True, mcp_enabled=True)
+    assert "UNATTENDED" in p
+    assert "mcp__kagura-memory__recall" in p
+
+
+def test_build_prompt_start_still_invokes_slash_command():
+    assert "/gh-issue-driven:start 9" in workflow.build_prompt("start", 9, [])
+
+
+def test_build_prompt_ship_still_invokes_slash_command():
+    assert "/gh-issue-driven:ship 2" in workflow.build_prompt("ship", 2, [])
+
+
+def test_head_rev_none_for_non_git_dir(tmp_path):
+    # Best-effort: a non-git path returns None rather than raising, so the
+    # implement empty-commit check degrades to "skip" instead of crashing.
+    assert workflow.head_rev(tmp_path) is None
+
+
+def test_head_rev_returns_sha_for_repo(tmp_path):
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@e", "-c", "user.name=t",
+         "commit", "--allow-empty", "-qm", "x"],
+        cwd=tmp_path, check=True,
+    )
+    sha = workflow.head_rev(tmp_path)
+    assert sha and len(sha) >= 7

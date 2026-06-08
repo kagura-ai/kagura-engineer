@@ -2,12 +2,14 @@
 
 `run_idea` walks a fixed phase sequence and returns a `RunReport`:
 
-    guard    → doctor blocking-check verification (no auto-setup)
-    recall   → load_pinned + recall + get_state (grounding / resume)
-    worktree → ensure run-<issue#> worktree (resumable)
-    start    → claude -p /gh-issue-driven:start → gate
-    ship     → claude -p /gh-issue-driven:ship  → gate → PR
-    persist  → remember(savepoint) + set_state(done)   (skipped by --no-remember)
+    guard     → doctor blocking-check verification (no auto-setup)
+    recall    → load_pinned + recall + get_state (grounding / resume)
+    worktree  → ensure run-<issue#> worktree (resumable)
+    start     → claude -p /gh-issue-driven:start → gate (design)
+    implement → claude -p TDD implementation → gate; a green phase that left no
+                commit is a clean FAIL (nothing to ship — issue #9)
+    ship      → claude -p /gh-issue-driven:ship  → gate → PR
+    persist   → remember(savepoint) + set_state(done)   (skipped by --no-remember)
 
 A red/unknown gate verdict halts with BLOCKED and a resume hint; a
 non-zero claude exit is FAIL. External calls (worktree, memory SDK, claude launch) are
@@ -29,7 +31,7 @@ from .gate import evaluate
 from .memory import MemoryClient, resolve_memory_client
 from .result import PhaseResult, RunReport, RunStatus
 from .worktree import WorktreeError, ensure_worktree
-from .workflow import invoke_phase
+from .workflow import head_rev, invoke_phase
 
 _log = logging.getLogger(__name__)
 
@@ -39,7 +41,7 @@ STATUS_EXIT: dict[RunStatus, int] = {
     RunStatus.BLOCKED: 2,
 }
 
-_PHASES = ("start", "ship")
+_PHASES = ("start", "implement", "ship")
 
 # Soft cap on grounding lines injected into the phase prompt (pinned + recall +
 # explore neighbours), so graph enrichment can't balloon the context.
@@ -126,9 +128,13 @@ def run_idea(
         return _finish()
     phases.append(PhaseResult("worktree", RunStatus.OK, str(wt)))
 
-    # 3-4. act: start, then ship.
+    # 3-5. act: start (design gate) → implement (TDD) → ship (PR gate).
     pr_url = None
     for phase in _PHASES:
+        # issue #9: capture HEAD before implement so we can detect whether it
+        # actually committed anything (a green design with no code leaves ship
+        # nothing to package). None (unreadable) → degrade to skipping the check.
+        head_before = head_rev(wt) if phase == "implement" else None
         try:
             inv = invoke_phase(phase, issue, wt, grounding, unattended=unattended,
                                mcp_config=cfg.memory_mcp_config)
@@ -156,6 +162,18 @@ def run_idea(
             return _finish(
                 worktree=str(wt),
                 resume_hint=f"review the {phase} gate, then re-run `kagura-engineer run {issue}`",
+            )
+        # issue #9: a green implement phase that left no commit is a clear,
+        # named failure — not a confusing "ship red" downstream on an empty diff.
+        if phase == "implement" and head_before is not None and head_rev(wt) == head_before:
+            phases.append(PhaseResult(
+                phase, RunStatus.FAIL,
+                "implement produced no commit — design passed gate1 but no code "
+                "was written/committed, so there is nothing to ship",
+            ))
+            return _finish(
+                worktree=str(wt),
+                resume_hint=f"implement issue #{issue} on the branch and commit, then re-run `kagura-engineer run {issue}`",
             )
         pr_url = inv.pr_url or pr_url
         phases.append(PhaseResult(phase, RunStatus.OK, f"{phase} ok", verdict=decision.verdict))
