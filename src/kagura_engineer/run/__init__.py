@@ -225,6 +225,21 @@ def run_idea(
                 resume_hint=f"implement issue #{issue} on the branch and commit, then re-run `kagura-engineer run {issue}`",
             )
         pr_url = inv.pr_url or pr_url
+        # issue #18: a green ship that produced no PR URL did not actually push a
+        # branch / open a PR — the run has NOT reached a PR. Reporting OK / exit 0
+        # "PR reached" here is a false success (the same trap as #9's empty diff).
+        # Cross-check the green verdict against the real artifact and FAIL if it's
+        # missing, so `goal` and the exit code never claim a PR that doesn't exist.
+        if phase == "ship" and not pr_url:
+            _record(PhaseResult(
+                phase, RunStatus.FAIL,
+                "ship reported green but produced no PR URL — the branch was not "
+                "pushed or no PR was opened, so the run did not reach a PR",
+            ))
+            return _finish(
+                worktree=str(wt),
+                resume_hint=f"check why ship did not open a PR, then re-run `kagura-engineer run {issue}`",
+            )
         _record(PhaseResult(phase, RunStatus.OK, f"{phase} ok", verdict=decision.verdict))
 
     # 5. persist. The PR already exists, so a persist failure is non-fatal:
