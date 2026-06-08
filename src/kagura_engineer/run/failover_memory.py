@@ -61,6 +61,53 @@ class FailoverMemoryClient:
     def get_state(self, context_id: str, key: str) -> dict | None:
         return self._inner.get_state(context_id, key)
 
+    # --- critical writes: cloud-first, buffer to WAL on confirmed failure ----
+    def remember(self, context_id: str, *, summary: str, content: str, type: str,
+                 tags: list[str] | None = None) -> str:
+        kwargs = {"summary": summary, "content": content, "type": type, "tags": tags}
+        try:
+            return self._inner.remember(context_id, **kwargs)
+        except Exception:  # noqa: BLE001 — confirmed cloud failure → buffer
+            _log.warning("cloud remember failed; buffering to WAL %s", self._wal_path)
+            self._append("remember", context_id, kwargs)
+            return f"wal:{uuid.uuid4().hex}"
+
+    def set_state(self, context_id: str, key: str, value: dict) -> None:
+        try:
+            self._inner.set_state(context_id, key, value)
+        except Exception:  # noqa: BLE001 — confirmed cloud failure → buffer
+            _log.warning("cloud set_state failed; buffering to WAL %s", self._wal_path)
+            self._append("set_state", context_id, {"key": key, "value": value})
+
+    # --- best-effort writes: delegate, NOT buffered --------------------------
+    def feedback(self, context_id: str, memory_id: str, *, weight: float = 1.0) -> None:
+        self._inner.feedback(context_id, memory_id, weight=weight)
+
+    def pin(self, context_id: str, memory_id: str) -> None:
+        self._inner.pin(context_id, memory_id)
+
+    def unpin(self, context_id: str, memory_id: str) -> None:
+        self._inner.unpin(context_id, memory_id)
+
+    # --- WAL append (durable) ------------------------------------------------
+    def _append(self, op: str, context_id: str, kwargs: dict[str, Any]) -> None:
+        self._wal_path.parent.mkdir(parents=True, exist_ok=True)
+        seq = len(self._read_records()) + 1
+        record = {"seq": seq, "op": op, "context_id": context_id, "kwargs": kwargs}
+        with open(self._wal_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+
+    def _read_records(self) -> list[dict]:
+        if not self._wal_path.exists():
+            return []
+        return [
+            json.loads(line)
+            for line in self._wal_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+
     # --- lifecycle -----------------------------------------------------------
     def close(self) -> None:
         closer = getattr(self._inner, "close", None)

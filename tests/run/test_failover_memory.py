@@ -82,3 +82,48 @@ def test_default_wal_path_is_under_kagura_and_keyed_by_context(tmp_path, monkeyp
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     p = default_wal_path("ctx-123")
     assert p == tmp_path / ".kagura" / "engineer" / "wal" / "ctx-123.jsonl"
+
+
+def _wal_records(path):
+    if not Path(path).exists():
+        return []
+    return [json.loads(l) for l in Path(path).read_text().splitlines() if l.strip()]
+
+
+def test_remember_success_does_not_buffer(tmp_path):
+    inner = _FakeInner()
+    c = FailoverMemoryClient(inner, tmp_path / "wal.jsonl")
+    rid = c.remember("ctx", summary="s", content="x", type="savepoint", tags=["t"])
+    assert rid == "cloud-id"
+    assert _wal_records(tmp_path / "wal.jsonl") == []
+
+
+def test_remember_failure_buffers_and_returns_wal_id(tmp_path):
+    inner = _FakeInner(); inner.fail_writes = True
+    c = FailoverMemoryClient(inner, tmp_path / "wal.jsonl")
+    rid = c.remember("ctx", summary="s", content="x", type="savepoint", tags=["t"])
+    assert rid.startswith("wal:")                      # synthetic id, no raise
+    recs = _wal_records(tmp_path / "wal.jsonl")
+    assert len(recs) == 1
+    assert recs[0]["op"] == "remember"
+    assert recs[0]["context_id"] == "ctx"
+    assert recs[0]["kwargs"] == {"summary": "s", "content": "x",
+                                 "type": "savepoint", "tags": ["t"]}
+
+
+def test_set_state_failure_buffers(tmp_path):
+    inner = _FakeInner(); inner.fail_writes = True
+    c = FailoverMemoryClient(inner, tmp_path / "wal.jsonl")
+    c.set_state("ctx", "run:1", {"done": True})        # must not raise
+    recs = _wal_records(tmp_path / "wal.jsonl")
+    assert len(recs) == 1
+    assert recs[0]["op"] == "set_state"
+    assert recs[0]["kwargs"] == {"key": "run:1", "value": {"done": True}}
+
+
+def test_feedback_failure_is_not_buffered(tmp_path):
+    inner = _FakeInner(); inner.fail_writes = True
+    c = FailoverMemoryClient(inner, tmp_path / "wal.jsonl")
+    with pytest.raises(RuntimeError):                   # best-effort: propagates
+        c.feedback("ctx", "m1")
+    assert _wal_records(tmp_path / "wal.jsonl") == []   # never buffered
