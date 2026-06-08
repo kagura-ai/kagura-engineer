@@ -164,3 +164,47 @@ def test_append_failure_preserves_no_raise(tmp_path):
     # Even though the WAL write fails, remember must NOT raise.
     rid = c.remember("ctx", summary="s", content="x", type="savepoint")
     assert rid.startswith("wal:")
+
+
+def test_drain_replays_in_order_and_empties_wal(tmp_path):
+    inner = _FakeInner(); inner.fail_writes = True
+    c = FailoverMemoryClient(inner, tmp_path / "wal.jsonl")
+    c.remember("ctx", summary="s1", content="x", type="savepoint", tags=None)
+    c.set_state("ctx", "run:1", {"done": True})
+    assert len(_wal_records(tmp_path / "wal.jsonl")) == 2
+
+    inner.fail_writes = False                          # cloud recovers
+    replayed = c.drain()
+    assert replayed == 2
+    assert _wal_records(tmp_path / "wal.jsonl") == []   # WAL emptied
+    assert ("remember", "s1") in inner.calls
+    assert ("set_state", "run:1") in inner.calls
+    # order preserved: remember before set_state
+    assert inner.calls.index(("remember", "s1")) < inner.calls.index(("set_state", "run:1"))
+
+
+def test_drain_partial_failure_keeps_remaining(tmp_path):
+    inner = _FakeInner(); inner.fail_writes = True
+    c = FailoverMemoryClient(inner, tmp_path / "wal.jsonl")
+    c.remember("ctx", summary="s1", content="x", type="savepoint", tags=None)
+    c.remember("ctx", summary="s2", content="x", type="savepoint", tags=None)
+
+    # inner accepts the first replay then fails on the second
+    calls = {"n": 0}
+    def flaky_remember(context_id, *, summary, content, type, tags=None):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("cloud down again")
+        inner.calls.append(("remember", summary))
+    inner.remember = flaky_remember
+
+    replayed = c.drain()
+    assert replayed == 1
+    recs = _wal_records(tmp_path / "wal.jsonl")
+    assert len(recs) == 1                               # the second record retained
+    assert recs[0]["kwargs"]["summary"] == "s2"
+
+
+def test_drain_no_wal_is_zero(tmp_path):
+    c = FailoverMemoryClient(_FakeInner(), tmp_path / "wal.jsonl")
+    assert c.drain() == 0

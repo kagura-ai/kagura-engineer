@@ -116,6 +116,45 @@ class FailoverMemoryClient:
             if line.strip()
         ]
 
+    # --- replay (drain) ------------------------------------------------------
+    def drain(self) -> int:
+        """Replay buffered WAL records to the inner cloud client in order. Drop
+        each record on success; stop at the first failure and keep the rest for
+        the next drain. Returns the count replayed."""
+        records = self._read_records()
+        if not records:
+            return 0
+        replayed = 0
+        remaining: list[dict] = []
+        stop = False
+        for rec in records:
+            if stop:
+                remaining.append(rec)
+                continue
+            try:
+                self._replay(rec)
+                replayed += 1
+            except Exception:  # noqa: BLE001 — cloud still down; keep this + rest
+                _log.warning("WAL replay failed at seq %s; %d records retained",
+                             rec.get("seq"), len(records) - replayed)
+                stop = True
+                remaining.append(rec)
+        if remaining:
+            self._wal_path.write_text(
+                "\n".join(json.dumps(r) for r in remaining) + "\n", encoding="utf-8")
+        else:
+            self._wal_path.unlink(missing_ok=True)
+        return replayed
+
+    def _replay(self, rec: dict) -> None:
+        op, context_id, kwargs = rec["op"], rec["context_id"], rec["kwargs"]
+        if op == "remember":
+            self._inner.remember(context_id, **kwargs)
+        elif op == "set_state":
+            self._inner.set_state(context_id, kwargs["key"], kwargs["value"])
+        else:  # unknown op (forward-compat): skip rather than loop forever
+            _log.warning("unknown WAL op %r; dropping record", op)
+
     # --- lifecycle -----------------------------------------------------------
     def close(self) -> None:
         closer = getattr(self._inner, "close", None)
