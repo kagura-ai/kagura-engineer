@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "kagura-engineer"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Autonomous coding harness over Claude Code + Kagura Memory"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
-authors = [{ name = "Kagura AI" }]
+authors = [{ name = "Kagura AI", email = "dev@kagura-ai.com" }]
 keywords = [
     "claude-code",
     "ai-agent",
@@ -59,6 +59,9 @@ Changelog = "https://github.com/kagura-ai/kagura-engineer/blob/main/CHANGELOG.md
 
 [project.scripts]
 kagura-engineer = "kagura_engineer.cli:app"
+
+[tool.hatch.version]
+path = "src/kagura_engineer/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/kagura_engineer"]
