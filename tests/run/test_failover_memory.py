@@ -87,7 +87,7 @@ def test_default_wal_path_is_under_kagura_and_keyed_by_context(tmp_path, monkeyp
 def _wal_records(path):
     if not Path(path).exists():
         return []
-    return [json.loads(l) for l in Path(path).read_text().splitlines() if l.strip()]
+    return [json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
 
 
 def test_remember_success_does_not_buffer(tmp_path):
@@ -127,3 +127,40 @@ def test_feedback_failure_is_not_buffered(tmp_path):
     with pytest.raises(RuntimeError):                   # best-effort: propagates
         c.feedback("ctx", "m1")
     assert _wal_records(tmp_path / "wal.jsonl") == []   # never buffered
+
+
+def test_set_state_success_does_not_buffer(tmp_path):
+    inner = _FakeInner()
+    c = FailoverMemoryClient(inner, tmp_path / "wal.jsonl")
+    c.set_state("ctx", "run:1", {"done": True})
+    assert _wal_records(tmp_path / "wal.jsonl") == []
+
+
+def test_pin_unpin_not_buffered_and_propagate(tmp_path):
+    class _RaisingInner(_FakeInner):
+        def pin(self, context_id, memory_id):
+            raise RuntimeError("cloud down")
+        def unpin(self, context_id, memory_id):
+            raise RuntimeError("cloud down")
+
+    c = FailoverMemoryClient(_RaisingInner(), tmp_path / "wal.jsonl")
+    with pytest.raises(RuntimeError):
+        c.pin("ctx", "m1")
+    assert _wal_records(tmp_path / "wal.jsonl") == []
+
+    with pytest.raises(RuntimeError):
+        c.unpin("ctx", "m1")
+    assert _wal_records(tmp_path / "wal.jsonl") == []
+
+
+def test_append_failure_preserves_no_raise(tmp_path):
+    # Make _wal_path's parent a FILE so mkdir raises → _append fails internally.
+    blocker = tmp_path / "blocker"
+    blocker.write_text("I am a file, not a dir")
+    wal_path = blocker / "wal.jsonl"  # mkdir will fail: parent is a file
+
+    inner = _FakeInner(); inner.fail_writes = True
+    c = FailoverMemoryClient(inner, wal_path)
+    # Even though the WAL write fails, remember must NOT raise.
+    rid = c.remember("ctx", summary="s", content="x", type="savepoint")
+    assert rid.startswith("wal:")

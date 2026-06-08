@@ -89,15 +89,23 @@ class FailoverMemoryClient:
     def unpin(self, context_id: str, memory_id: str) -> None:
         self._inner.unpin(context_id, memory_id)
 
-    # --- WAL append (durable) ------------------------------------------------
+    # --- WAL append (best-effort durable) ------------------------------------
     def _append(self, op: str, context_id: str, kwargs: dict[str, Any]) -> None:
-        self._wal_path.parent.mkdir(parents=True, exist_ok=True)
-        seq = len(self._read_records()) + 1
-        record = {"seq": seq, "op": op, "context_id": context_id, "kwargs": kwargs}
-        with open(self._wal_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record) + "\n")
-            f.flush()
-            os.fsync(f.fileno())
+        """Durably append one WAL record. Best-effort: a WAL write failure (disk
+        full, unwritable dir, non-serialisable value) is logged and swallowed so
+        the caller's no-raise contract holds — the write is then truly lost, which
+        is the same outcome as a dropped best-effort write."""
+        try:
+            self._wal_path.parent.mkdir(parents=True, exist_ok=True)
+            records = self._read_records()
+            seq = max((r.get("seq", 0) for r in records), default=0) + 1
+            record = {"seq": seq, "op": op, "context_id": context_id, "kwargs": kwargs}
+            with open(self._wal_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+        except Exception:  # noqa: BLE001 — WAL buffering is itself best-effort
+            _log.exception("WAL append failed; write is lost (op=%s)", op)
 
     def _read_records(self) -> list[dict]:
         if not self._wal_path.exists():
