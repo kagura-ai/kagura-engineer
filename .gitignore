@@ -27,6 +27,8 @@ venv/
 *.pem
 local-*.json
 local-*.yaml
+# Per-checkout harness config (backend choice, workspace/context ids) — local, not canonical
+repo.yaml
 
 # Editor / OS
 .vscode/
