@@ -18,6 +18,8 @@ shells out, and surfaces the report.
 
 **Announce:** "Using the kagura-engineer:review skill" (add "— with --fix, this is a Harness that commits" when fixing).
 
+Usage: `kagura-engineer:review [target]` — target defaults to `HEAD`; may be a git ref, branch, or PR number. Add `--fix` to auto-fix blocking findings (Harness).
+
 ## Steps
 
 1. **Validate the target.** The optional positional `TARGET` defaults to `HEAD`; it may

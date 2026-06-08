@@ -19,6 +19,18 @@ orchestration lives entirely in the CLI; this skill discovers config, gates on
 
 **Announce:** "Using the kagura-engineer:run skill — this is a Harness that will create a PR."
 
+## No-argument usage
+
+If invoked without an issue number, do NOT guess or shell out — print this and stop:
+
+```
+kagura-engineer:run <issue-number>
+  Drive one GitHub issue to a PR via the kagura-engineer harness.
+  ⚠ Harness: creates a worktree + commits, opens a PR, spends model budget, gates on HITL.
+  Example:  kagura-engineer:run 42
+  New here? run kagura-engineer:doctor first to check the environment.
+```
+
 ## Steps
 
 1. **Validate the issue argument.** The CLI takes a single positive integer issue

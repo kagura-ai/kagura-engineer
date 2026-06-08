@@ -20,6 +20,18 @@ CLI; this skill discovers config, gates on `doctor`, shells out, and surfaces re
 
 **Announce:** "Using the kagura-engineer:goal skill — this is a Harness that may create multiple PRs."
 
+## No-argument usage
+
+If invoked without a milestone title, do NOT guess or shell out — print this and stop:
+
+```
+kagura-engineer:goal <milestone-title>
+  Drive every open issue in a GitHub milestone to a PR via the harness.
+  ⚠ Harness (highest cost): a worktree + commits + a PR per issue; halts at the first blocked issue.
+  Example:  kagura-engineer:goal "v0.3"
+  New here? run kagura-engineer:doctor first to check the environment.
+```
+
 ## Steps
 
 1. **Validate the milestone argument.** The CLI takes a milestone *title* (string).

@@ -10,6 +10,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from .._http import build_request
 from ..setup.auth import AuthMethod, resolve_anthropic_auth
 from ..setup.memory_auth import MemoryAuthMethod, resolve_memory_cloud_auth
 from ..setup.ollama import model_present
@@ -100,14 +101,25 @@ def check_gh() -> CheckResult:
 
 
 def _http_json(url: str) -> dict:
-    with urllib.request.urlopen(url, timeout=_TIMEOUT) as resp:  # noqa: S310 (trusted config URL)
+    # build_request sets a User-Agent — Cloudflare 403s the stdlib default (see _http.py).
+    with urllib.request.urlopen(build_request(url), timeout=_TIMEOUT) as resp:  # noqa: S310 (trusted config URL)
         return json.loads(resp.read())
 
 
 def _http_reach(url: str) -> None:
     """Open url to confirm reachability; raises on connection/HTTP error. Body ignored."""
-    with urllib.request.urlopen(url, timeout=_TIMEOUT) as resp:  # noqa: S310 (trusted config URL)
+    with urllib.request.urlopen(build_request(url), timeout=_TIMEOUT) as resp:  # noqa: S310 (trusted config URL)
         resp.read()  # body discarded; open succeeding is sufficient proof of reachability
+
+
+_CLAUDE_MODEL_NAMES = {"haiku", "sonnet", "opus"}
+
+
+def _looks_like_claude_model(name: str) -> bool:
+    """True if `name` is a Claude model (haiku/sonnet/opus/claude-*), which has
+    no place in `review.models` (those are Ollama model names for the reviewer)."""
+    base = name.split(":")[0].strip().lower()
+    return base in _CLAUDE_MODEL_NAMES or base.startswith("claude")
 
 
 def check_ollama(base_url: str, required: list[str]) -> CheckResult:
@@ -134,6 +146,22 @@ def check_ollama(base_url: str, required: list[str]) -> CheckResult:
     }
     missing = [m for m in required if not model_present(m, have)]
     if missing:
+        # `review.models` are Ollama model names for the reviewer. A Claude
+        # model name (haiku/sonnet/opus/claude-*) there is a config mistake —
+        # `ollama pull haiku` would fail, so guide instead of suggesting it.
+        claude_like = [m for m in missing if _looks_like_claude_model(m)]
+        ollama_missing = [m for m in missing if m not in claude_like]
+        if claude_like:
+            hint = (
+                f"'{claude_like[0]}' is a Claude model, not an Ollama model — "
+                "review.models lists Ollama model names for the reviewer; "
+                "remove it or use an Ollama model"
+            )
+            if ollama_missing:
+                hint += f". For the rest: ollama pull {' && ollama pull '.join(ollama_missing)}"
+            return CheckResult(
+                "ollama", Status.WARN, f"missing models: {', '.join(missing)}", hint
+            )
         return CheckResult(
             "ollama",
             Status.WARN,

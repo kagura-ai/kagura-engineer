@@ -11,6 +11,8 @@ invoke it on its own to check the environment.
 
 **Announce:** "Using the kagura-engineer:doctor skill to check the harness environment."
 
+Usage: `kagura-engineer:doctor` — no arguments. Pass `--config <path>` only if `repo.yaml` is not in the current directory.
+
 This skill reimplements nothing. It shells out to the installed CLI and surfaces the
 result. If `kagura-engineer` is not on PATH, tell the user to install it
 (`uv tool install kagura-engineer` or `pip install kagura-engineer`) and stop.
