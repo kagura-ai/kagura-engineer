@@ -50,6 +50,15 @@ def test_env_key_empty_string_treated_as_unset(tmp_path):
     assert res.method is MemoryAuthMethod.NONE
 
 
+def test_env_key_whitespace_only_treated_as_unset(tmp_path):
+    # A whitespace-only key (e.g. a stray-space `.env` line) would make the
+    # SDK send `Authorization: Bearer ` and 401, so `_resolve_auth` strips
+    # and falls through. The resolver must match — reporting it as present
+    # would re-create the "doctor passes, run dies" mismatch.
+    res = resolve_memory_cloud_auth(env={"KAGURA_API_KEY": "   "}, home=tmp_path)
+    assert res.method is MemoryAuthMethod.NONE
+
+
 # --- OAuth profile cache branch ----------------------------------------
 
 
@@ -68,6 +77,19 @@ def test_oauth_profile_honors_default_profile_name(tmp_path):
     res = resolve_memory_cloud_auth(env={}, home=tmp_path)
     assert res.method is MemoryAuthMethod.OAUTH_PROFILE
     assert res.profile == "work"
+
+
+def test_default_profile_pointing_at_missing_entry_is_not_a_login(tmp_path):
+    # default_profile names a profile that does not exist in `profiles`.
+    # The SDK's `get_profile(None)` is `profiles.get(default_profile)`, which
+    # returns None here — it never falls back to an arbitrary profile. The
+    # resolver must report NONE too; guessing a profile the SDK would not
+    # select re-creates the footgun this module exists to close.
+    _write_credentials(
+        tmp_path, {"work": {"access_token": "tok"}}, default_profile="stale"
+    )
+    res = resolve_memory_cloud_auth(env={}, home=tmp_path)
+    assert res.method is MemoryAuthMethod.NONE
 
 
 def test_empty_profiles_dict_is_not_a_login(tmp_path):

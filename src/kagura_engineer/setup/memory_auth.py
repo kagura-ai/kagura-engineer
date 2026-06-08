@@ -80,11 +80,15 @@ def _resolve_oauth_profile(home: Path) -> str | None:
         return None
     # The SDK defaults to "default" when `default_profile` is absent.
     key = data.get("default_profile") or "default"
+    # Match the SDK exactly: `CredentialsFile.get_profile(None)` is just
+    # `profiles.get(default_profile)`, which returns None when default_profile
+    # names a missing entry — it never falls back to an arbitrary profile.
+    # Reporting a profile the SDK would NOT select re-creates the exact
+    # "doctor passes, run dies" footgun this module exists to close, so we
+    # return None here (→ caller WARNs / NEEDS_USER) instead of guessing.
     if key in profiles:
         return key
-    # default_profile points at a missing entry; fall back to any present
-    # profile so a usable login is still detected.
-    return next(iter(profiles))
+    return None
 
 
 def resolve_memory_cloud_auth(
@@ -98,9 +102,14 @@ def resolve_memory_cloud_auth(
     env = env if env is not None else dict(os.environ)
     home = home if home is not None else Path.home()
 
-    # 1. Env var. Empty string is treated as "not set" — the conventional
-    # failure mode is exporting the name with no value in a .env file.
-    if env.get("KAGURA_API_KEY"):
+    # 1. Env var. Empty / whitespace-only is treated as "not set" — the
+    # conventional failure mode is exporting the name with no value (or a
+    # stray space) in a .env file. The `.strip()` check mirrors the SDK's
+    # `_resolve_auth` precisely (`env_key and env_key.strip()`): a
+    # whitespace-only key would send `Authorization: Bearer ` and 401, so
+    # the SDK falls through — reporting it as present here would re-create
+    # the "doctor passes, run dies" mismatch.
+    if (env.get("KAGURA_API_KEY") or "").strip():
         return MemoryAuthResolution(
             method=MemoryAuthMethod.ENV_API_KEY,
             detail="env KAGURA_API_KEY is set",
