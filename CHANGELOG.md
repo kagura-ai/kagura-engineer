@@ -8,7 +8,7 @@ While the project is in `0.x`, minor versions may carry breaking changes.
 
 ## [Unreleased]
 
-## [0.2.0] — 2026-06-08
+## [0.2.0] — 2026-06-09
 
 ### Added
 
