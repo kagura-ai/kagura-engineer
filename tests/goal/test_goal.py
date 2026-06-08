@@ -137,3 +137,33 @@ def test_goal_does_not_close_injected_memory_client(monkeypatch):
     injected = _ClosableMem()
     run_milestone(_cfg(), "m", memory=injected)
     assert injected.closed is False
+
+
+# --- issue #12: surface per-issue phase progress through goal --------------
+
+
+def test_goal_threads_progress_with_issue_prefix(monkeypatch):
+    # goal must forward a progress sink to each run_idea, prefixed with the issue
+    # so a whole-milestone run shows which issue's phase is running.
+    monkeypatch.setattr(g, "list_milestone_issues", lambda m: [1, 2], raising=True)
+    monkeypatch.setattr(g, "resolve_memory_client", lambda cfg: _Mem(), raising=True)
+
+    def _fake_run_idea(cfg, issue, *, progress=None, **kw):
+        if progress is not None:
+            progress("▶ start …")  # each issue emits one phase line
+        return _rr(issue, RunStatus.OK)
+
+    monkeypatch.setattr(g, "run_idea", _fake_run_idea, raising=True)
+    lines: list[str] = []
+    run_milestone(_cfg(), "m", progress=lines.append)
+    assert any("#1" in l and "start" in l for l in lines), lines
+    assert any("#2" in l and "start" in l for l in lines), lines
+
+
+def test_goal_progress_is_optional(monkeypatch):
+    # No sink → run_idea still gets called and the milestone completes.
+    monkeypatch.setattr(g, "list_milestone_issues", lambda m: [1], raising=True)
+    monkeypatch.setattr(g, "resolve_memory_client", lambda cfg: _Mem(), raising=True)
+    monkeypatch.setattr(g, "run_idea", lambda cfg, issue, **kw: _rr(issue, RunStatus.OK), raising=True)
+    rep = run_milestone(_cfg(), "m")
+    assert rep.status is RunStatus.OK

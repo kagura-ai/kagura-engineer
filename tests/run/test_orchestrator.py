@@ -431,3 +431,62 @@ def test_run_owned_client_without_close_is_safe(monkeypatch):
     monkeypatch.setattr("kagura_engineer.run.resolve_memory_client", lambda cfg: _FakeMemory())
     report = run_idea(_cfg(), 42, repo_root=Path("/repo"))  # _FakeMemory has no close()
     assert report.status is RunStatus.OK
+
+
+# --- issue #12: stream incremental phase progress to a sink ----------------
+
+
+def test_progress_sink_emits_enter_and_exit_for_each_act_phase(monkeypatch):
+    # A long run is opaque without incremental feedback: each act phase must
+    # announce on enter (▶) BEFORE its multi-minute claude call, and on exit.
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "implement": PhaseInvocation("implement", 0, "", "", "green", None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+    shas = iter(["before", "after"])  # implement committed → proceeds to ship
+    monkeypatch.setattr("kagura_engineer.run.head_rev", lambda wt: next(shas))
+    lines: list[str] = []
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"),
+                      progress=lines.append)
+    assert report.status is RunStatus.OK
+    for phase in ("start", "implement", "ship"):
+        assert any(l.startswith("▶") and phase in l for l in lines), f"no enter line for {phase}: {lines}"
+    # exit lines carry the OK icon + the gate verdict
+    assert any("✅" in l and "start" in l and "green" in l for l in lines), lines
+
+
+def test_progress_enter_precedes_exit_per_phase(monkeypatch):
+    # The enter marker must come before the exit marker for the same phase, so a
+    # stalled phase shows "▶ running" and never a premature "done".
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+    lines: list[str] = []
+    run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"), progress=lines.append)
+    enter = next(i for i, l in enumerate(lines) if l.startswith("▶") and "start" in l)
+    exit_ = next(i for i, l in enumerate(lines) if "✅" in l and "start" in l)
+    assert enter < exit_, lines
+
+
+def test_progress_sink_emits_blocked_line_on_halt(monkeypatch):
+    # A gate halt must surface as a blocked progress line, not silence.
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "red", None),
+    })
+    lines: list[str] = []
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"),
+                      progress=lines.append)
+    assert report.status is RunStatus.BLOCKED
+    assert any("⏸" in l and "start" in l and "red" in l for l in lines), lines
+
+
+def test_progress_sink_is_optional(monkeypatch):
+    # Default (no sink) must not crash — the run still produces a normal report.
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK

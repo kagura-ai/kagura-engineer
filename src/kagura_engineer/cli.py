@@ -173,7 +173,12 @@ def run(
         typer.echo(f"run: invalid config '{config}': {exc}", err=True)
         raise typer.Exit(code=2)
 
-    report = run_idea(cfg, issue, no_remember=no_remember, unattended=unattended)
+    # issue #12: stream phase progress to stdout as the run advances, so a
+    # long autonomous run is not a blank screen until the final table. Suppressed
+    # under --json so stdout stays clean, machine-parseable JSON.
+    progress = None if json_out else typer.echo
+    report = run_idea(cfg, issue, no_remember=no_remember, unattended=unattended,
+                      progress=progress)
 
     if json_out:
         typer.echo(run_to_json(report))
@@ -261,7 +266,11 @@ def goal(
         typer.echo(f"goal: invalid config '{config}': {exc}", err=True)
         raise typer.Exit(code=2)
 
-    report = run_milestone(cfg, milestone, no_remember=no_remember, unattended=unattended)
+    # issue #12: per-issue phase progress to stdout (suppressed under --json),
+    # so a multi-issue milestone is not silent until the final table.
+    progress = None if json_out else typer.echo
+    report = run_milestone(cfg, milestone, no_remember=no_remember,
+                           unattended=unattended, progress=progress)
 
     if json_out:
         typer.echo(goal_to_json(report))
