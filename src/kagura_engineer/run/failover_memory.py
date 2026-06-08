@@ -132,28 +132,42 @@ class FailoverMemoryClient:
                 remaining.append(rec)
                 continue
             try:
-                self._replay(rec)
-                replayed += 1
+                if self._replay(rec):
+                    replayed += 1
             except Exception:  # noqa: BLE001 — cloud still down; keep this + rest
                 _log.warning("WAL replay failed at seq %s; %d records retained",
                              rec.get("seq"), len(records) - replayed)
                 stop = True
                 remaining.append(rec)
-        if remaining:
-            self._wal_path.write_text(
-                "\n".join(json.dumps(r) for r in remaining) + "\n", encoding="utf-8")
-        else:
-            self._wal_path.unlink(missing_ok=True)
+        self._write_records(remaining)
         return replayed
 
-    def _replay(self, rec: dict) -> None:
+    def _write_records(self, records: list[dict]) -> None:
+        """Atomically + durably replace the WAL with `records` (empty → remove).
+        Write a sibling temp file, fsync it, then os.replace (atomic on POSIX) so
+        a crash mid-rewrite cannot truncate the not-yet-replayed tail."""
+        if not records:
+            self._wal_path.unlink(missing_ok=True)
+            return
+        tmp = self._wal_path.with_suffix(self._wal_path.suffix + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write("\n".join(json.dumps(r) for r in records) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, self._wal_path)
+
+    def _replay(self, rec: dict) -> bool:
+        """Apply one record to the inner client. Returns True if a known op was
+        replayed, False if the op was unknown (dropped for forward-compat)."""
         op, context_id, kwargs = rec["op"], rec["context_id"], rec["kwargs"]
         if op == "remember":
             self._inner.remember(context_id, **kwargs)
-        elif op == "set_state":
+            return True
+        if op == "set_state":
             self._inner.set_state(context_id, kwargs["key"], kwargs["value"])
-        else:  # unknown op (forward-compat): skip rather than loop forever
-            _log.warning("unknown WAL op %r; dropping record", op)
+            return True
+        _log.warning("unknown WAL op %r; dropping record", op)
+        return False
 
     # --- lifecycle -----------------------------------------------------------
     def close(self) -> None:

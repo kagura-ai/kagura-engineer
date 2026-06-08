@@ -208,3 +208,35 @@ def test_drain_partial_failure_keeps_remaining(tmp_path):
 def test_drain_no_wal_is_zero(tmp_path):
     c = FailoverMemoryClient(_FakeInner(), tmp_path / "wal.jsonl")
     assert c.drain() == 0
+
+
+def test_drain_unknown_op_is_dropped_not_counted(tmp_path):
+    """An unknown op is silently dropped: not counted, not retained in WAL, no raise."""
+    wal_path = tmp_path / "wal.jsonl"
+    # Write one unknown-op record followed by one valid remember record.
+    wal_path.write_text(
+        json.dumps({"seq": 1, "op": "bogus", "context_id": "c", "kwargs": {}}) + "\n" +
+        json.dumps({"seq": 2, "op": "remember", "context_id": "c",
+                    "kwargs": {"summary": "s", "content": "x",
+                               "type": "savepoint", "tags": None}}) + "\n",
+        encoding="utf-8",
+    )
+    inner = _FakeInner()
+    c = FailoverMemoryClient(inner, wal_path)
+
+    replayed = c.drain()
+
+    # Only the known op is counted.
+    assert replayed == 1
+    # The valid remember was actually applied.
+    assert ("remember", "s") in inner.calls
+    # WAL is empty — unknown op not retained, valid op consumed.
+    assert _wal_records(wal_path) == []
+
+
+def test_drain_whitespace_only_wal_is_zero(tmp_path):
+    """A WAL file containing only blank lines should drain() to 0 without error."""
+    wal_path = tmp_path / "wal.jsonl"
+    wal_path.write_text("\n\n   \n", encoding="utf-8")
+    c = FailoverMemoryClient(_FakeInner(), wal_path)
+    assert c.drain() == 0
