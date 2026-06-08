@@ -11,6 +11,7 @@ import urllib.request
 from pathlib import Path
 
 from ..setup.auth import AuthMethod, resolve_anthropic_auth
+from ..setup.memory_auth import MemoryAuthMethod, resolve_memory_cloud_auth
 from ..setup.ollama import model_present
 from .result import CheckResult, Status
 
@@ -180,7 +181,28 @@ def check_haiku() -> CheckResult:
     )
 
 
-def check_memory_cloud(base_url: str) -> CheckResult:
+# The canonical fix for a missing Memory Cloud credential. Names BOTH
+# supported sources (issue #6 acceptance: env key and `kagura auth login`
+# are both honoured, env-first) so the hint matches what `run/memory.py`
+# actually consumes — no more README/code mismatch.
+_MEMORY_AUTH_HINT = (
+    "export KAGURA_API_KEY=... or run `kagura auth login` to authenticate Memory Cloud"
+)
+
+
+def check_memory_cloud(
+    base_url: str,
+    *,
+    env: dict[str, str] | None = None,
+    home: "Path | None" = None,
+) -> CheckResult:
+    # Resolve the credential FIRST (cheap, local). Unlike the old probe this
+    # check no longer passes silently when the host is up but no credential
+    # resolves — that is the exact first-run footgun from issue #6 (doctor
+    # passes, `run` dies). env/home are injectable for tests; production reads
+    # os.environ / Path.home() via the resolver's defaults.
+    auth = resolve_memory_cloud_auth(env=env, home=home)
+
     # Extract host-only form so that any userinfo (basic auth) embedded in
     # `memory_cloud_url` is NOT echoed into the doctor detail string —
     # `doctor --json` is a common artefact in CI logs and chat pastes.
@@ -193,13 +215,21 @@ def check_memory_cloud(base_url: str) -> CheckResult:
     try:
         _http_reach(f"{base_url.rstrip('/')}/health")
     except urllib.error.HTTPError as exc:
-        # An HTTP response (even 4xx/5xx) proves the host is reachable; this is a
-        # reachability probe, not an auth/health check. Full authed recall smoke is Plan 3.
+        # An HTTP response (even 4xx/5xx) proves the host is reachable. A 4xx is
+        # often the auth layer itself rejecting an absent/bad credential, so when
+        # no credential resolves we point straight at the fix instead of deferring.
+        if auth.method is MemoryAuthMethod.NONE:
+            return CheckResult(
+                "memory-cloud",
+                Status.WARN,
+                f"reachable but /health returned HTTP {exc.code}; no credential resolves",
+                _MEMORY_AUTH_HINT,
+            )
         return CheckResult(
             "memory-cloud",
             Status.WARN,
-            f"reachable but /health returned HTTP {exc.code}",
-            "auth/endpoint verified later by setup / Plan 3 recall smoke",
+            f"reachable but /health returned HTTP {exc.code} (auth={auth.detail})",
+            "verify the Memory Cloud endpoint / credential",
         )
     except (urllib.error.URLError, OSError, ValueError) as exc:
         # ValueError covers a malformed/schemeless memory_cloud_url
@@ -213,7 +243,18 @@ def check_memory_cloud(base_url: str) -> CheckResult:
             f"unreachable: {exc}",
             "check config.memory_cloud_url / network",
         )
-    return CheckResult("memory-cloud", Status.OK, f"reachable at {host_only}")
+    # Host is up. Now gate on the credential: a reachable host with no
+    # resolvable credential is a WARN, not an OK.
+    if auth.method is MemoryAuthMethod.NONE:
+        return CheckResult(
+            "memory-cloud",
+            Status.WARN,
+            f"reachable at {host_only}, but no Memory Cloud credential resolves",
+            _MEMORY_AUTH_HINT,
+        )
+    return CheckResult(
+        "memory-cloud", Status.OK, f"reachable at {host_only}; auth={auth.detail}"
+    )
 
 
 def check_local_memory(path: str) -> CheckResult:

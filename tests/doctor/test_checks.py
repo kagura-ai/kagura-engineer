@@ -207,12 +207,14 @@ def test_ollama_warn_when_models_field_is_null(monkeypatch):
     assert "missing" in r.detail.lower()
 
 
-def test_memory_cloud_ok_strips_credentials(monkeypatch):
+def test_memory_cloud_ok_strips_credentials(monkeypatch, tmp_path):
     # If the configured URL embeds basic auth, the OK detail must not echo it.
     monkeypatch.setattr(
         checks.urllib.request, "urlopen", lambda *a, **k: _FakeResp({"status": "ok"})
     )
-    r = checks.check_memory_cloud("https://svc:s3cret@memory.local")
+    r = checks.check_memory_cloud(
+        "https://svc:s3cret@memory.local", env={"KAGURA_API_KEY": "kg"}, home=tmp_path
+    )
     assert r.status is Status.OK
     assert "s3cret" not in r.detail
     assert "svc@" not in r.detail
@@ -274,11 +276,13 @@ def test_haiku_ok_with_legacy_claude_json(monkeypatch, tmp_path):
     assert "subscription" in r.detail.lower()
 
 
-def test_memory_cloud_ok_when_reachable(monkeypatch):
+def test_memory_cloud_ok_when_reachable(monkeypatch, tmp_path):
     monkeypatch.setattr(
         checks.urllib.request, "urlopen", lambda *a, **k: _FakeResp({"status": "ok"})
     )
-    r = checks.check_memory_cloud("https://memory.kagura-ai.com")
+    r = checks.check_memory_cloud(
+        "https://memory.kagura-ai.com", env={"KAGURA_API_KEY": "kg"}, home=tmp_path
+    )
     assert r.status is Status.OK
 
 
@@ -291,7 +295,7 @@ def test_memory_cloud_fail_when_unreachable(monkeypatch):
     assert r.status is Status.FAIL
 
 
-def test_memory_cloud_ok_with_non_json_body(monkeypatch):
+def test_memory_cloud_ok_with_non_json_body(monkeypatch, tmp_path):
     class _PlainResp:
         def read(self):
             return b"OK"  # not JSON
@@ -303,7 +307,9 @@ def test_memory_cloud_ok_with_non_json_body(monkeypatch):
             return False
 
     monkeypatch.setattr(checks.urllib.request, "urlopen", lambda *a, **k: _PlainResp())
-    r = checks.check_memory_cloud("https://memory.kagura-ai.com")
+    r = checks.check_memory_cloud(
+        "https://memory.kagura-ai.com", env={"KAGURA_API_KEY": "kg"}, home=tmp_path
+    )
     assert r.status is Status.OK
 
 
@@ -321,16 +327,79 @@ def test_memory_cloud_fail_on_malformed_url(monkeypatch):
     assert r.fix_hint is not None
 
 
-def test_memory_cloud_warn_on_http_error(monkeypatch):
+def test_memory_cloud_warn_on_http_error(monkeypatch, tmp_path):
     def _boom(*a, **k):
         raise urllib.error.HTTPError(
             "https://memory.kagura-ai.com/health", 403, "Forbidden", {}, None
         )
 
     monkeypatch.setattr(checks.urllib.request, "urlopen", _boom)
-    r = checks.check_memory_cloud("https://memory.kagura-ai.com")
+    r = checks.check_memory_cloud(
+        "https://memory.kagura-ai.com", env={"KAGURA_API_KEY": "kg"}, home=tmp_path
+    )
     assert r.status is Status.WARN
     assert "403" in r.detail
+
+
+def test_memory_cloud_warn_when_reachable_but_no_credential(monkeypatch, tmp_path):
+    # Reachable host + NO credential resolves (no KAGURA_API_KEY, no
+    # `kagura auth login` cache) must NOT be a silent pass — it is the exact
+    # first-run footgun from issue #6: doctor passes, run dies. WARN + guide.
+    monkeypatch.setattr(
+        checks.urllib.request, "urlopen", lambda *a, **k: _FakeResp({"status": "ok"})
+    )
+    r = checks.check_memory_cloud(
+        "https://memory.kagura-ai.com", env={}, home=tmp_path
+    )
+    assert r.status is Status.WARN
+    assert "credential" in r.detail.lower()
+    # The hint must name both real fixes (env var and login).
+    assert "KAGURA_API_KEY" in r.fix_hint
+    assert "kagura auth login" in r.fix_hint
+
+
+def test_memory_cloud_ok_reports_env_api_key_auth(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        checks.urllib.request, "urlopen", lambda *a, **k: _FakeResp({"status": "ok"})
+    )
+    r = checks.check_memory_cloud(
+        "https://memory.kagura-ai.com", env={"KAGURA_API_KEY": "kg"}, home=tmp_path
+    )
+    assert r.status is Status.OK
+    assert "auth" in r.detail.lower()
+
+
+def test_memory_cloud_ok_reports_oauth_profile_auth(monkeypatch, tmp_path):
+    # `kagura auth login` cache present, no env key → OK via the OAuth profile.
+    import json as _j
+
+    cred = tmp_path / ".kagura" / "credentials.json"
+    cred.parent.mkdir(parents=True)
+    cred.write_text(_j.dumps({"default_profile": "default", "profiles": {"default": {}}}))
+    monkeypatch.setattr(
+        checks.urllib.request, "urlopen", lambda *a, **k: _FakeResp({"status": "ok"})
+    )
+    r = checks.check_memory_cloud(
+        "https://memory.kagura-ai.com", env={}, home=tmp_path
+    )
+    assert r.status is Status.OK
+    assert "auth" in r.detail.lower()
+
+
+def test_memory_cloud_http_error_without_credential_guides_auth(monkeypatch, tmp_path):
+    # 401/403 with no credential is the auth smoking gun: the hint must point
+    # at the credential, not just defer to a later smoke.
+    def _boom(*a, **k):
+        raise urllib.error.HTTPError(
+            "https://memory.kagura-ai.com/health", 401, "Unauthorized", {}, None
+        )
+
+    monkeypatch.setattr(checks.urllib.request, "urlopen", _boom)
+    r = checks.check_memory_cloud(
+        "https://memory.kagura-ai.com", env={}, home=tmp_path
+    )
+    assert r.status is Status.WARN
+    assert "KAGURA_API_KEY" in r.fix_hint
 
 
 def test_check_gh_issue_driven_ok_when_plugin_present(tmp_path, monkeypatch):
