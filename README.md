@@ -80,6 +80,21 @@ pip install -e ".[dev]"     # editable install + pytest
 Either way, this exposes the `kagura-engineer` CLI (entry point
 `kagura_engineer.cli:app`).
 
+### As a Claude Code plugin
+
+This repo also ships a thin **skill-plugin wrapper** (`.claude-plugin/` +
+`skills/`) so the harness is installable and discoverable from inside Claude
+Code. The skills (`kagura-engineer:doctor`, `:setup`, `:run`, `:review`,
+`:goal`) are *thin* — they shell out to the CLI installed above and surface its
+output; no harness logic is duplicated. Install the CLI first, then add the
+plugin from this repo as a marketplace source.
+
+It is referenced by the umbrella **[`kagura-plugins`](https://github.com/kagura-ai)**
+marketplace (rule: *reference, don't vendor* — the plugin lives here and
+`kagura-plugins/marketplace.json` points at it), where `kagura-engineer` takes
+its place as a **Tier-2 Harness**: multi-phase, stateful/resumable, repo-mutating,
+PR-creating, and HITL-gated.
+
 ---
 
 ## Configuration
