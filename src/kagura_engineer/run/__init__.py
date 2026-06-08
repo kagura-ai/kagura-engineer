@@ -22,6 +22,7 @@ external boundary (`run_all`, `ensure_worktree`, `invoke_phase`, the
 from __future__ import annotations
 
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Callable
@@ -63,6 +64,26 @@ _PROGRESS_ICON: dict[RunStatus, str] = {
     RunStatus.BLOCKED: "⏸",
     RunStatus.FAIL: "❌",
 }
+
+
+# issue #19: headless `claude -p` prints a fatal auth failure to STDOUT (not
+# stderr) and exits 1 — e.g. "Invalid API key · Fix external API key" — when a
+# stale/invalid ANTHROPIC_API_KEY in the environment overrides the operator's
+# logged-in (OAuth) session. We do NOT silently scrub the key (that would break
+# legitimate API-key auth, e.g. CI); instead we detect the signature and hand the
+# operator the exact, safe remedy.
+_AUTH_FAIL_RE = re.compile(r"invalid api key|fix external api key", re.IGNORECASE)
+
+
+def _auth_failure_hint(stdout: str, stderr: str, issue: int) -> str | None:
+    if _AUTH_FAIL_RE.search(f"{stdout}\n{stderr}"):
+        return (
+            "headless claude could not authenticate — a stale/invalid "
+            "ANTHROPIC_API_KEY in the environment overrides your logged-in (OAuth) "
+            "session. Unset it and re-run: "
+            f"`env -u ANTHROPIC_API_KEY kagura-engineer run {issue}`"
+        )
+    return None
 
 
 def _state_key(issue: int) -> str:
@@ -193,13 +214,15 @@ def run_idea(
             return _finish(worktree=str(wt))
         if inv.returncode != 0:
             if inv.timed_out:
-                tail = "timed out"
-            elif inv.stderr:
-                tail = inv.stderr.strip()[-200:]
+                tail, hint = "timed out", None
             else:
-                tail = ""
+                # issue #19: claude surfaces some fatal errors (e.g. "Invalid API
+                # key") on STDOUT, not stderr — fall back to stdout so the failure
+                # is never an opaque "claude exited 1:" with an empty tail.
+                tail = (inv.stderr.strip() or inv.stdout.strip())[-200:]
+                hint = _auth_failure_hint(inv.stdout, inv.stderr, issue)
             _record(PhaseResult(phase, RunStatus.FAIL, f"claude exited {inv.returncode}: {tail}"))
-            return _finish(worktree=str(wt))
+            return _finish(worktree=str(wt), resume_hint=hint)
         decision = evaluate(inv.verdict)
         if not decision.proceed:
             # Resume marker is best-effort; a memory hiccup must not mask the halt.
