@@ -38,6 +38,11 @@ class Config(BaseModel):
     # the memory MCP tools attached for in-task recall (default: string injection
     # only). The server's tools must be permitted in your Claude settings.
     memory_mcp_config: str | None = None
+    # issue: failover memory. When the cloud backend is active, wrap the cloud
+    # client so critical writes (savepoint remember + set_state) that fail during
+    # a Cloud outage are buffered to a local WAL and replayed on the next run.
+    # Default on for resilience; set false to use the bare cloud client.
+    memory_failover: bool = True
 
     @model_validator(mode="after")
     def _require_cloud_fields(self) -> "Config":
