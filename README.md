@@ -345,8 +345,9 @@ resolves under pytest without an editable install.
 The version lives in **`src/kagura_engineer/__init__.py`** — the canonical source,
 read by hatch for the wheel. The Claude Code plugin manifests
 `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` mirror it.
-`/gh-issue-driven:tag` bumps the two manifests; **bump `__init__.py` to match in the
-same release**. `tests/test_plugin.py` asserts all three versions are equal, so a skew
+`/gh-issue-driven:tag` bumps the two manifests; **bump `__init__.py` (and the literal
+in `tests/test_version.py`) to match in the same release**. `tests/test_plugin.py`
+asserts `__init__.py`, `plugin.json`, and `marketplace.json` are all equal, so a skew
 fails CI.
 
 ---
