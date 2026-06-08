@@ -21,8 +21,11 @@ shells out, and surfaces the report.
 ## Steps
 
 1. **Validate the target.** The optional positional `TARGET` defaults to `HEAD`; it may
-   be a git ref, branch name, or PR number. Validate any user-supplied value (a ref name
-   or a positive integer) before shell interpolation — do not pass free-form text.
+   be a git ref, branch name, or PR number. Validate before shell interpolation against a
+   **first-char-anchored** allow-list — a positive integer `^[1-9][0-9]{0,8}$` for a PR
+   number, or `^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$` for a ref/branch (leading `-` rejected
+   so it cannot be parsed as an option) — and pass it after a `--` separator (step 4). Do
+   not pass free-form text.
 
 2. **Discover config.** `repo.yaml` in CWD by default; pass `--config <path>` otherwise.
 
@@ -36,16 +39,17 @@ shells out, and surfaces the report.
    reviewer (ollama / model) before you wait on a review. If `overall == "fail"`, hand
    off to `kagura-engineer:setup`; otherwise proceed.
 
-4. **Review** (read-only):
+4. **Review** (read-only). Options go before the `--` separator, the validated target
+   after it, so a target beginning with `-` can never be parsed as a flag:
 
    ```bash
-   kagura-engineer review <target> --base <ref> --json
+   kagura-engineer review --base <ref> --json -- <target>
    ```
 
    Or, to auto-fix blocking findings (**confirm the Harness warning first**):
 
    ```bash
-   kagura-engineer review <target> --fix --json
+   kagura-engineer review --fix --json -- <target>
    ```
 
 5. **Interpret the status.** `ok` (exit 0) → green/yellow or nothing to review.

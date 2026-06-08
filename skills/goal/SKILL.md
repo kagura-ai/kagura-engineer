@@ -23,8 +23,10 @@ CLI; this skill discovers config, gates on `doctor`, shells out, and surfaces re
 ## Steps
 
 1. **Validate the milestone argument.** The CLI takes a milestone *title* (string).
-   Treat it as data: validate against a conservative allow-list (e.g.
-   `^[A-Za-z0-9 ._/-]{1,100}$`) and quote it in the shell — do not pass unsanitized text.
+   Treat it as data: validate against a **first-char-anchored** allow-list
+   (`^[A-Za-z0-9][A-Za-z0-9 ._/-]{0,99}$`) so a leading `-` cannot be parsed as an
+   option, and pass it after a `--` end-of-options separator, quoted (step 5). Do not
+   pass unsanitized text.
 
 2. **Discover config.** `repo.yaml` in CWD by default; pass `--config <path>` otherwise.
 
@@ -43,10 +45,12 @@ CLI; this skill discovers config, gates on `doctor`, shells out, and surfaces re
 5. **Run the milestone:**
 
    ```bash
-   kagura-engineer goal "<milestone>" --json
+   kagura-engineer goal --json -- "<milestone>"
    ```
 
-   Add `--unattended` to suppress interactive gates, `--no-remember` to skip savepoints.
+   The `--` separator ends option parsing, so a milestone that survives validation but
+   begins with `-` is still treated as a positional, never a flag. Add `--unattended` to
+   suppress interactive gates, `--no-remember` to skip savepoints (before the `--`).
 
 6. **Interpret the status.** `ok` (exit 0) → all issues shipped (`completed == total`).
    `blocked` (exit 2) → halted at an issue; show `resume_hint` and the per-issue table.
