@@ -38,8 +38,19 @@ def run_milestone(
     repo_root: Path | None = None,
 ) -> GoalReport:
     started = time.monotonic()
+    # The milestone owns ONE memory client across all its issues (passed to each
+    # run_idea as injected, so run_idea never closes it). We close it here, in
+    # `_finish`, so the cloud client's event loop doesn't hang the process at exit
+    # (issue #14). Declared up-front (None) so the pre-`mem` early returns are safe.
+    mem: MemoryClient | None = None
+    owns_mem = False
 
     def _finish(**kw) -> GoalReport:
+        if owns_mem and mem is not None and hasattr(mem, "close"):
+            try:
+                mem.close()
+            except Exception:  # noqa: BLE001 — teardown is best-effort
+                pass
         kw["duration_s"] = time.monotonic() - started
         return GoalReport(milestone=milestone, **kw)
 
@@ -52,6 +63,7 @@ def run_milestone(
         return _finish(status=RunStatus.OK, detail=f"no open issues in milestone {milestone!r}")
 
     mem = memory if memory is not None else resolve_memory_client(cfg)
+    owns_mem = memory is None
     reports = []
     for issue in issues:
         rep = run_idea(cfg, issue, no_remember=no_remember, unattended=unattended,

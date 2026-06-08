@@ -62,11 +62,23 @@ def run_idea(
     repo_root: Path | None = None,
 ) -> RunReport:
     mem = memory if memory is not None else resolve_memory_client(cfg)
+    # We close ONLY a client we created — an injected one is the caller's (goal /
+    # tests) to own. Every exit path returns via `_finish`, so closing there
+    # covers success, halt, and FAIL alike.
+    owns_mem = memory is None
     root = repo_root if repo_root is not None else Path.cwd()
     started = time.monotonic()
     phases: list[PhaseResult] = []
 
     def _finish(*, pr_url=None, worktree=None, resume_hint=None) -> RunReport:
+        # issue #14: a cloud client holds a persistent event loop + httpx client
+        # that hangs the process at exit if never closed. Best-effort teardown,
+        # guarded so it can never mask the run's result.
+        if owns_mem and hasattr(mem, "close"):
+            try:
+                mem.close()
+            except Exception:  # noqa: BLE001 — teardown is best-effort
+                _log.exception("run memory client close failed (non-fatal)")
         return RunReport(
             issue=issue, phases=phases, pr_url=pr_url, worktree=worktree,
             resume_hint=resume_hint, duration_s=time.monotonic() - started,
