@@ -7,9 +7,12 @@ An autonomous coding harness over [Claude Code](https://claude.ai/code) and
 [Kagura Memory Cloud](https://github.com/kagura-ai/memory-cloud).
 
 The long-term goal is a memory-backed **actor** that executes real, resumable
-coding tasks (see [Roadmap](#roadmap)). What ships **today** is the bootstrap
-layer that gets a machine ready to run it: a `doctor` that checks the dependency
-chain and a `setup` that resolves it.
+coding tasks (see [Roadmap](#roadmap)). Shipping **today**: `doctor` and `setup`
+stand up the environment, and `run` / `review` / `goal` drive GitHub issues to
+PRs through a memory-grounded loop. It's an early `0.x` harness, not a finished
+actor. [Memory Cloud](https://github.com/kagura-ai/memory-cloud) is the
+recommended backbone (free to start), with an offline SQLite fallback for the
+basic loop.
 
 ---
 
@@ -25,7 +28,7 @@ chain and a `setup` that resolves it.
 | **Plan 5** | `LocalMemoryClient` — offline SQLite memory backend | ✅ done |
 | Plan 5+ | rich graph/feedback/Sleep, memory auto-store, worktree runs — **Memory Cloud required** | 📋 planned |
 
-`doctor`, `setup`, `run`, `review`, and `goal` are runnable now (363 tests green).
+`doctor`, `setup`, `run`, `review`, and `goal` are runnable now (390 tests green).
 
 ---
 
@@ -138,7 +141,8 @@ is isolated — one failing check never aborts the rest of the run.
 | `gh` | `gh` on PATH and authenticated |
 | `ollama` | daemon reachable at `ollama_url`, `review.models` present (tag-aware match) |
 | `haiku` | an Anthropic auth source resolves (env key or subscription cache) |
-| `memory-cloud` | `memory_cloud_url` reachable (host-only; credentials never echoed) |
+| `memory` | backend-aware: `memory-cloud` reachable, or (when `memory_backend: local`) `memory-local` SQLite writable — host/credentials never echoed |
+| `gh-issue-driven` | the `gh-issue-driven` plugin is installed (the workflow `run`/`goal` drive) |
 
 Statuses: **OK / WARN / FAIL**.
 
@@ -268,21 +272,30 @@ kagura-engineer/
 ├── pyproject.toml
 ├── docs/plan/                 # design docs (plan-2-setup.md, …)
 ├── src/kagura_engineer/
-│   ├── cli.py                 # typer app: doctor / setup / run
+│   ├── cli.py                 # typer app: doctor / setup / run / review / goal
 │   ├── config.py              # repo.yaml loader + Config (pydantic)
+│   ├── proc.py                # shared subprocess helper
 │   ├── doctor/                # Plan 1 — checks, registry, result, render
 │   │   ├── checks.py
 │   │   ├── registry.py        # run_all(cfg) → [CheckResult], per-check isolation
 │   │   ├── result.py          # Status (OK/WARN/FAIL), CheckResult
 │   │   └── render.py          # table + json
-│   └── setup/                 # Plan 2 — step orchestrator
-│       ├── __init__.py        # STEP_NAMES, build_plan, run_plan → SetupReport
-│       ├── auth.py            # resolve_anthropic_auth (shared with doctor)
-│       ├── install.py         # run_install helper + stderr_tail
-│       ├── platform.py        # OS / package-manager / WSL detection
-│       ├── result.py          # StepStatus, StepResult, SetupReport
-│       ├── git.py · claude.py · gh.py · ollama.py · memory_cloud.py
-│       └── render.py
+│   ├── setup/                 # Plan 2 — step orchestrator
+│   │   ├── __init__.py        # STEP_NAMES, build_plan, run_plan → SetupReport
+│   │   ├── auth.py            # resolve_anthropic_auth (shared with doctor)
+│   │   ├── install.py         # run_install helper + stderr_tail
+│   │   ├── platform.py        # OS / package-manager / WSL detection
+│   │   ├── result.py          # StepStatus, StepResult, SetupReport
+│   │   ├── git.py · claude.py · gh.py · ollama.py · memory_cloud.py
+│   │   └── render.py
+│   ├── run/                   # Plan 3 — memory-grounded agent loop
+│   │   ├── memory.py          # MemoryClient Protocol + KaguraCloudClient
+│   │   ├── local_memory.py    # Plan 5 — offline SQLite backend
+│   │   └── gate.py · workflow.py · worktree.py · result.py · render.py
+│   ├── review/                # Plan 4 — reviewer launch + verdict gate
+│   │   └── reviewer.py · envelope.py · loop.py · fixer.py · context.py · …
+│   └── goal/                  # milestone driver over run
+│       └── issues.py · render.py · result.py
 └── tests/                     # pytest (pythonpath = src)
 ```
 
@@ -292,7 +305,7 @@ kagura-engineer/
 
 ```bash
 pip install -e ".[dev]"
-pytest                         # 243 tests
+pytest                         # 390 tests
 ```
 
 `pyproject.toml` sets `pythonpath = ["src"]`, so `import kagura_engineer`
