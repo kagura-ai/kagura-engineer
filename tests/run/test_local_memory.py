@@ -120,6 +120,19 @@ def test_feedback_unknown_id_is_noop(tmp_path):
     c.feedback(CTX, "does-not-exist")  # no row updated, no error
 
 
+def test_feedback_nonpositive_weight_is_noop(tmp_path):
+    # Contract (issue #21): weight <= 0 means "no reinforcement" → importance is
+    # left untouched: not bumped, and (for a negative weight) not decremented.
+    # This keeps the local backend in sign-agreement with the cloud adapter,
+    # which also no-ops on weight <= 0 rather than recording negative feedback.
+    c = _client(tmp_path)
+    mid = c.remember(CTX, summary="alpha", content="", type="note")  # importance 0.5
+    c.feedback(CTX, mid, weight=0.0)
+    c.feedback(CTX, mid, weight=-5.0)
+    assert c.recall(CTX, "alpha", min_importance=0.45) == ["alpha"]  # not decremented
+    assert c.recall(CTX, "alpha", min_importance=0.55) == []         # not bumped
+
+
 def test_pin_unpin_drives_load_pinned(tmp_path):
     c = _client(tmp_path)
     a = c.remember(CTX, summary="pin me", content="x", type="note")

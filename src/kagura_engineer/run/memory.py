@@ -37,8 +37,12 @@ class MemoryClient(Protocol):
         self, context_id: str, *, summary: str, content: str, type: str,
         tags: list[str] | None = None,
     ) -> str: ...
-    # Reinforce a memory that proved useful (Hebbian-style). `weight` scales
-    # the reinforcement; the implementation decides how it is applied.
+    # Reinforce a memory that proved useful (Hebbian-style). Contract (issue #21):
+    # `weight > 0` reinforces — its magnitude is honored best-effort and is
+    # backend-dependent (the local backend scales an importance bump by it; the
+    # cloud backend is boolean and ignores magnitude). `weight <= 0` means "no
+    # reinforcement" and is a NO-OP on every backend: the harness only ever
+    # reinforces useful memories, so no backend records negative feedback.
     def feedback(self, context_id: str, memory_id: str, *, weight: float = 1.0) -> None: ...
     # Pin / unpin a memory so load_pinned surfaces it (delivery_mode toggle).
     def pin(self, context_id: str, memory_id: str) -> None: ...
@@ -164,14 +168,20 @@ class KaguraCloudClient:
         ]
 
     def feedback(self, context_id: str, memory_id: str, *, weight: float = 1.0) -> None:
+        # Contract (issue #21): weight > 0 reinforces; weight <= 0 is "no
+        # reinforcement" → no-op. We never send helpful=False: the harness only
+        # reinforces useful memories (no "penalize" caller), and a non-positive
+        # weight must not record active negative feedback on the cloud — that
+        # would also diverge from the local backend's no-op.
+        if weight <= 0:
+            return
         # The real kagura-memory 0.29 SDK is helpful-based, not weight-based:
         #   feedback(context_id, memory_id, helpful, *, query=None, note=None)
-        # Map the Protocol's reinforcement intent (a positive `weight`) onto the
-        # SDK's `helpful` contract — issue #16. Passing `weight=` raised
-        # TypeError, silently killing cloud reinforcement once per recalled
-        # memory. The offline fake (tests/run/test_memory.py) mirrors the REAL
-        # signature so a regression back to `weight=` fails CI.
-        self._run(self._sdk.feedback(context_id, memory_id, helpful=weight > 0))
+        # so a positive reinforcement weight maps to helpful=True (issue #16).
+        # Passing `weight=` raised TypeError, silently killing cloud reinforcement
+        # once per recalled memory; the offline fake (tests/run/test_memory.py)
+        # mirrors the REAL signature so a regression back to `weight=` fails CI.
+        self._run(self._sdk.feedback(context_id, memory_id, helpful=True))
 
     def pin(self, context_id: str, memory_id: str) -> None:
         self._run(self._sdk.update_memory(context_id, memory_id=memory_id, delivery_mode="always"))
