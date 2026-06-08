@@ -102,6 +102,39 @@ def test_phase_nonzero_returncode_is_fail(monkeypatch):
     report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
     assert report.status is RunStatus.FAIL
     assert report.phases[-1].name == "start"
+    assert "boom" in report.phases[-1].detail  # stderr surfaced
+    assert "ANTHROPIC_API_KEY" not in (report.resume_hint or "")  # non-auth error
+
+
+# --- issue #19: surface headless claude auth failure + actionable hint -------
+
+
+def test_phase_fail_surfaces_stdout_when_stderr_empty(monkeypatch):
+    # claude prints some fatal errors (e.g. "Invalid API key") to stdout, NOT
+    # stderr — the FAIL detail must never be an opaque "claude exited 1:" with an
+    # empty tail (issue #19).
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation(
+            "start", 1, "Invalid API key · Fix external API key", "", None, None),
+    })
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.FAIL
+    assert report.phases[-1].name == "start"
+    assert "invalid api key" in report.phases[-1].detail.lower()  # stdout surfaced
+    # actionable remedy for the stale-key trap, with the concrete issue number
+    assert "ANTHROPIC_API_KEY" in (report.resume_hint or "")
+    assert "run 42" in (report.resume_hint or "")
+
+
+def test_phase_fail_auth_hint_only_on_auth_signature(monkeypatch):
+    # A non-auth failure on stdout gets surfaced but NOT the ANTHROPIC_API_KEY hint.
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 1, "Traceback: boom", "", None, None),
+    })
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.FAIL
+    assert "boom" in report.phases[-1].detail
+    assert "ANTHROPIC_API_KEY" not in (report.resume_hint or "")
 
 
 def test_no_remember_skips_persist(monkeypatch):
