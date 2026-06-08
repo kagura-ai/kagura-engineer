@@ -111,6 +111,24 @@ def test_skill_frontmatter(verb):
     assert fm.get("description"), f"{verb}: description is required"
 
 
+def test_skills_match_cli_verbs():
+    """The skill set must track the CLI's commands. A verb added / removed / renamed
+    in cli.py without a matching skill (or an EXPECTED_SKILLS update) is a drift bug —
+    exactly the SKILL.md↔CLI divergence the thin-wrapper contract is meant to avoid.
+    """
+    from kagura_engineer.cli import app
+
+    cli_verbs = sorted(
+        (c.name or c.callback.__name__)
+        for c in app.registered_commands
+        if c.name or c.callback
+    )
+    assert sorted(EXPECTED_SKILLS) == cli_verbs, (
+        f"skill set {sorted(EXPECTED_SKILLS)} != CLI verbs {cli_verbs} — "
+        "add/rename the skill under skills/ or update EXPECTED_SKILLS"
+    )
+
+
 @pytest.mark.parametrize("verb", EXPECTED_SKILLS)
 def test_skill_is_thin_wrapper(verb):
     _, text = _frontmatter(SKILLS_DIR / verb / "SKILL.md")
