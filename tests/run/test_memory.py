@@ -2,30 +2,37 @@ from kagura_engineer.run.memory import KaguraCloudClient, MemoryClient
 
 
 class _FakeSDK:
-    """Stand-in for kagura_memory.KaguraClient with recorded calls."""
+    """Stand-in for ``kagura_memory.KaguraClient`` — an **async** SDK: every
+    method is a coroutine, mirroring kagura_memory 0.29 (issue #1). Modelling the
+    real contract is the point: a sync fake (the previous version) hid the
+    sync/async mismatch that left the whole cloud path dead."""
 
     def __init__(self):
         self.calls = []
+        self.closed = False
 
-    def recall(self, context_id, query="", k=5, filters=None, **kw):
+    async def recall(self, context_id, query="", k=5, filters=None, **kw):
         self.calls.append(("recall", context_id, query, k, filters))
         return {"results": [{"summary": "past decision A"}, {"summary": "pattern B"}, {"no_summary": 1}]}
 
-    def load_pinned(self, context_id, cap=None):
+    async def load_pinned(self, context_id, cap=None):
         self.calls.append(("load_pinned", context_id))
         return {"memories": [{"summary": "guardrail: TDD required"}]}
 
-    def remember(self, context_id, summary, content, type="note", **kw):
+    async def remember(self, context_id, summary, content, type="note", **kw):
         self.calls.append(("remember", context_id, summary, type))
         return {"memory_id": "mem-123"}
 
-    def get_state(self, context_id, key=None):
+    async def get_state(self, context_id, key=None):
         self.calls.append(("get_state", context_id, key))
         return {"value": {"phase": "start"}}
 
-    def set_state(self, context_id, key, value, **kw):
+    async def set_state(self, context_id, key, value, **kw):
         self.calls.append(("set_state", context_id, key, value))
         return {"ok": True}
+
+    async def close(self):
+        self.closed = True
 
 
 def test_recall_returns_summary_strings_and_skips_missing():
@@ -67,10 +74,64 @@ def test_kagura_cloud_client_satisfies_protocol():
 
 def test_get_state_returns_none_when_missing():
     class _MissingSDK:
-        def get_state(self, ctx, key):
+        async def get_state(self, ctx, key):
             return None
 
     assert KaguraCloudClient(_MissingSDK()).get_state("ctx", "k") is None
+
+
+# --- issue #1: the bridge must AWAIT the async SDK -------------------------
+
+
+def test_bridge_awaits_async_sdk_not_returns_coroutine():
+    # Regression for #1: the methods called the async SDK synchronously, so
+    # `resp` was a coroutine and `resp.get(...)` raised — the whole cloud path
+    # was dead. The bridge must run the coroutine to completion and parse the
+    # resolved dict.
+    out = KaguraCloudClient(_FakeSDK()).recall("ctx", "q")
+    assert out == ["past decision A", "pattern B"]
+
+
+def test_calls_run_on_one_persistent_loop():
+    # The SDK's httpx.AsyncClient binds to the loop on first await; every call
+    # must run on the SAME loop, so a second call after the first must not fail
+    # with "Event loop is closed" (the per-call asyncio.run() failure mode).
+    c = KaguraCloudClient(_FakeSDK())
+    assert c.recall("ctx", "q1") == ["past decision A", "pattern B"]
+    assert c.load_pinned("ctx") == ["guardrail: TDD required"]  # 2nd call, same loop
+
+
+def test_close_closes_sdk_and_loop():
+    sdk = _FakeSDK()
+    c = KaguraCloudClient(sdk)
+    c.recall("ctx", "q")
+    c.close()
+    assert sdk.closed is True
+    assert c._loop.is_closed()
+
+
+def test_close_is_safe_without_sdk_close_and_is_idempotent():
+    class _NoClose:
+        async def recall(self, *a, **k):
+            return {"results": []}
+
+    c = KaguraCloudClient(_NoClose())
+    c.close()  # SDK has no close() → still closes the loop, no raise
+    c.close()  # idempotent
+    assert c._loop.is_closed()
+
+
+# --- issue #1: mcp_url normalisation --------------------------------------
+
+
+def test_mcp_url_appends_mcp_idempotently():
+    from kagura_engineer.run.memory import _mcp_url
+
+    assert _mcp_url("https://memory.kagura-ai.com") == "https://memory.kagura-ai.com/mcp"
+    assert _mcp_url("https://memory.kagura-ai.com/") == "https://memory.kagura-ai.com/mcp"
+    assert _mcp_url("https://memory.kagura-ai.com/mcp") == "https://memory.kagura-ai.com/mcp"
+    assert _mcp_url("https://memory.kagura-ai.com/mcp/") == "https://memory.kagura-ai.com/mcp"
+    assert _mcp_url("") == ""
 
 
 # --- Plan 5: backend factory ----------------------------------------------
@@ -114,10 +175,8 @@ def test_invalid_memory_backend_raises_config_error(tmp_path):
 
 
 def test_cloud_recall_detailed_returns_pairs_and_recall_wraps():
-    from kagura_engineer.run.memory import KaguraCloudClient
-
     class _Sdk:
-        def recall(self, context_id, *, query, k, filters):
+        async def recall(self, context_id, *, query, k, filters):
             return {"results": [{"memory_id": "a", "summary": "S1"}, {"summary": "no-id"}]}
 
     c = KaguraCloudClient(_Sdk())
@@ -126,11 +185,10 @@ def test_cloud_recall_detailed_returns_pairs_and_recall_wraps():
 
 
 def test_cloud_feedback_passthrough():
-    from kagura_engineer.run.memory import KaguraCloudClient
     seen = {}
 
     class _Sdk:
-        def feedback(self, context_id, *, memory_id, weight):
+        async def feedback(self, context_id, *, memory_id, weight):
             seen.update(context_id=context_id, memory_id=memory_id, weight=weight)
 
     KaguraCloudClient(_Sdk()).feedback("ctx", "m1", weight=2.0)
@@ -141,11 +199,10 @@ def test_cloud_feedback_passthrough():
 
 
 def test_cloud_recall_passes_tag_and_importance_filters():
-    from kagura_engineer.run.memory import KaguraCloudClient
     seen = {}
 
     class _Sdk:
-        def recall(self, context_id, *, query, k, filters):
+        async def recall(self, context_id, *, query, k, filters):
             seen["filters"] = filters
             return {"results": []}
 
@@ -156,11 +213,10 @@ def test_cloud_recall_passes_tag_and_importance_filters():
 
 
 def test_cloud_recall_no_filters_is_trust_only():
-    from kagura_engineer.run.memory import KaguraCloudClient
     seen = {}
 
     class _Sdk:
-        def recall(self, context_id, *, query, k, filters):
+        async def recall(self, context_id, *, query, k, filters):
             seen["filters"] = filters
             return {"results": []}
 
@@ -169,11 +225,10 @@ def test_cloud_recall_no_filters_is_trust_only():
 
 
 def test_cloud_pin_unpin_passthrough():
-    from kagura_engineer.run.memory import KaguraCloudClient
     calls = []
 
     class _Sdk:
-        def update_memory(self, context_id, *, memory_id, delivery_mode):
+        async def update_memory(self, context_id, *, memory_id, delivery_mode):
             calls.append((memory_id, delivery_mode))
 
     c = KaguraCloudClient(_Sdk())
@@ -183,11 +238,10 @@ def test_cloud_pin_unpin_passthrough():
 
 
 def test_cloud_explore_passthrough_and_parse():
-    from kagura_engineer.run.memory import KaguraCloudClient
     seen = {}
 
     class _Sdk:
-        def explore(self, context_id, *, memory_id, depth):
+        async def explore(self, context_id, *, memory_id, depth):
             seen.update(memory_id=memory_id, depth=depth)
             return {"nodes": [{"memory_id": "a", "summary": "A"}, {"summary": "no-id"}]}
 
