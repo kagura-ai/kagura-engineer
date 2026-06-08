@@ -31,7 +31,7 @@ from ..config import Config
 from ..doctor.registry import run_all
 from .gate import evaluate
 from .memory import MemoryClient, resolve_memory_client
-from .result import PhaseResult, RunReport, RunStatus
+from .result import STATUS_ICON, PhaseResult, RunReport, RunStatus
 from .worktree import WorktreeError, ensure_worktree
 from .workflow import head_rev, invoke_phase
 
@@ -44,6 +44,11 @@ STATUS_EXIT: dict[RunStatus, int] = {
 }
 
 _PHASES = ("start", "implement", "ship")
+
+# issue #12 progress-stream glyphs reuse the table renderer's single source of
+# truth (run/result.STATUS_ICON) so a streamed phase marker can never drift from
+# the final RunReport table.
+_PROGRESS_ICON = STATUS_ICON
 
 # Soft cap on grounding lines injected into the phase prompt (pinned + recall +
 # explore neighbours), so graph enrichment can't balloon the context.
@@ -58,14 +63,6 @@ _GROUNDING_CAP = 12
 # captured child stdout (`PhaseInvocation`), so the contract is untouched.
 ProgressSink = Callable[[str], None]
 
-# Phase-exit icons, mirroring run/render.py's table vocabulary.
-_PROGRESS_ICON: dict[RunStatus, str] = {
-    RunStatus.OK: "✅",
-    RunStatus.BLOCKED: "⏸",
-    RunStatus.FAIL: "❌",
-}
-
-
 # issue #19: headless `claude -p` prints a fatal auth failure to STDOUT (not
 # stderr) and exits 1 — e.g. "Invalid API key · Fix external API key" — when a
 # stale/invalid ANTHROPIC_API_KEY in the environment overrides the operator's
@@ -78,9 +75,9 @@ _AUTH_FAIL_RE = re.compile(r"invalid api key|fix external api key", re.IGNORECAS
 def _auth_failure_hint(stdout: str, stderr: str, issue: int) -> str | None:
     if _AUTH_FAIL_RE.search(f"{stdout}\n{stderr}"):
         return (
-            "headless claude could not authenticate — a stale/invalid "
-            "ANTHROPIC_API_KEY in the environment overrides your logged-in (OAuth) "
-            "session. Unset it and re-run: "
+            "headless claude reported an API-key error. This is usually a "
+            "stale/invalid ANTHROPIC_API_KEY in the environment overriding your "
+            "logged-in (OAuth) session — if it is set, unset it and re-run: "
             f"`env -u ANTHROPIC_API_KEY kagura-engineer run {issue}`"
         )
     return None
@@ -218,8 +215,10 @@ def run_idea(
             else:
                 # issue #19: claude surfaces some fatal errors (e.g. "Invalid API
                 # key") on STDOUT, not stderr — fall back to stdout so the failure
-                # is never an opaque "claude exited 1:" with an empty tail.
-                tail = (inv.stderr.strip() or inv.stdout.strip())[-200:]
+                # is never an opaque "claude exited 1:" with an empty tail. If BOTH
+                # streams are empty, say so explicitly rather than printing nothing.
+                tail = (inv.stderr.strip() or inv.stdout.strip())[-200:] \
+                    or "(no output captured)"
                 hint = _auth_failure_hint(inv.stdout, inv.stderr, issue)
             _record(PhaseResult(phase, RunStatus.FAIL, f"claude exited {inv.returncode}: {tail}"))
             return _finish(worktree=str(wt), resume_hint=hint)
@@ -251,9 +250,10 @@ def run_idea(
         # issue #18: a green ship that produced no PR URL did not actually push a
         # branch / open a PR — the run has NOT reached a PR. Reporting OK / exit 0
         # "PR reached" here is a false success (the same trap as #9's empty diff).
-        # Cross-check the green verdict against the real artifact and FAIL if it's
-        # missing, so `goal` and the exit code never claim a PR that doesn't exist.
-        if phase == "ship" and not pr_url:
+        # Cross-check THIS phase's artifact (`inv.pr_url`, not the accumulated
+        # `pr_url`) so a stray URL from an earlier phase can't mask a ship that
+        # produced none, and FAIL if it's missing.
+        if phase == "ship" and not inv.pr_url:
             _record(PhaseResult(
                 phase, RunStatus.FAIL,
                 "ship reported green but produced no PR URL — the branch was not "

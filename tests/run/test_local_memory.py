@@ -133,6 +133,35 @@ def test_feedback_nonpositive_weight_is_noop(tmp_path):
     assert c.recall(CTX, "alpha", min_importance=0.55) == []         # not bumped
 
 
+def test_feedback_sign_semantics_agree_across_backends(tmp_path):
+    # issue #21 acceptance: the local and cloud backends must AGREE on the sign
+    # contract — weight > 0 reinforces, weight <= 0 is a no-op. Pin both in one
+    # place so a future refactor cannot drift one threshold without failing here.
+    from kagura_engineer.run.memory import KaguraCloudClient
+
+    cloud_calls: list[bool] = []
+
+    class _Sdk:
+        async def feedback(self, context_id, memory_id, helpful, *, query=None, note=None):
+            cloud_calls.append(helpful)
+
+    cloud = KaguraCloudClient(_Sdk())
+
+    for i, (weight, reinforces) in enumerate([(1.0, True), (0.0, False), (-1.0, False)]):
+        # cloud: "reinforce" ⇔ the SDK was called (and only ever with helpful=True)
+        cloud_calls.clear()
+        cloud.feedback(CTX, "m1", weight=weight)
+        assert bool(cloud_calls) is reinforces, f"cloud weight={weight}"
+        assert all(cloud_calls), "cloud must never send helpful=False"
+
+        # local: "reinforce" ⇔ importance rose above the 0.5 default
+        local = LocalMemoryClient(str(tmp_path / f"mem-{i}.db"))
+        mid = local.remember(CTX, summary="alpha", content="", type="note")
+        local.feedback(CTX, mid, weight=weight)
+        bumped = local.recall(CTX, "alpha", min_importance=0.55) == ["alpha"]
+        assert bumped is reinforces, f"local weight={weight}"
+
+
 def test_pin_unpin_drives_load_pinned(tmp_path):
     c = _client(tmp_path)
     a = c.remember(CTX, summary="pin me", content="x", type="note")

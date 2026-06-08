@@ -6,13 +6,7 @@ import json
 from rich.console import Console
 from rich.table import Table
 
-from .result import PhaseResult, RunReport, RunStatus
-
-_ICON: dict[RunStatus, str] = {
-    RunStatus.OK: "✅",
-    RunStatus.BLOCKED: "⏸",
-    RunStatus.FAIL: "❌",
-}
+from .result import STATUS_ICON as _ICON, PhaseResult, RunReport
 
 
 def _phase_to_dict(p: PhaseResult) -> dict:
