@@ -109,3 +109,31 @@ def test_unattended_threads_to_run_idea(monkeypatch):
     monkeypatch.setattr(g, "run_idea", _fake_run_idea, raising=True)
     run_milestone(_cfg(), "m", unattended=True)
     assert seen == [True]
+
+
+# --- issue #14: close the memory client goal owns (in-process loop leaks it) ---
+
+
+class _ClosableMem(_Mem):
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+def test_goal_closes_owned_memory_client(monkeypatch):
+    monkeypatch.setattr(g, "list_milestone_issues", lambda m: [1, 2], raising=True)
+    owned = _ClosableMem()
+    monkeypatch.setattr(g, "resolve_memory_client", lambda cfg: owned, raising=True)
+    monkeypatch.setattr(g, "run_idea", lambda cfg, issue, **kw: _rr(issue, RunStatus.OK), raising=True)
+    run_milestone(_cfg(), "m")
+    assert owned.closed is True
+
+
+def test_goal_does_not_close_injected_memory_client(monkeypatch):
+    monkeypatch.setattr(g, "list_milestone_issues", lambda m: [1], raising=True)
+    monkeypatch.setattr(g, "run_idea", lambda cfg, issue, **kw: _rr(issue, RunStatus.OK), raising=True)
+    injected = _ClosableMem()
+    run_milestone(_cfg(), "m", memory=injected)
+    assert injected.closed is False

@@ -370,3 +370,64 @@ def test_implement_head_rev_unreadable_skips_check(monkeypatch):
     monkeypatch.setattr("kagura_engineer.run.head_rev", lambda wt: None)
     report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
     assert report.status is RunStatus.OK  # check skipped, ship proceeds
+
+
+# --- issue #14: close the memory client we own (cloud loop hangs otherwise) ---
+
+
+class _ClosableFakeMemory(_FakeMemory):
+    def __init__(self):
+        super().__init__()
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+def test_run_closes_owned_memory_client(monkeypatch):
+    # When run_idea creates the client itself (memory=None) it must close it —
+    # a cloud client's persistent event loop otherwise hangs the process at exit.
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+    owned = _ClosableFakeMemory()
+    monkeypatch.setattr("kagura_engineer.run.resolve_memory_client", lambda cfg: owned)
+    report = run_idea(_cfg(), 42, repo_root=Path("/repo"))  # no memory= → run owns it
+    assert report.status is RunStatus.OK
+    assert owned.closed is True
+
+
+def test_run_does_not_close_injected_memory_client(monkeypatch):
+    # An injected client is owned by the caller (goal / tests) — do NOT close it.
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+    injected = _ClosableFakeMemory()
+    report = run_idea(_cfg(), 42, memory=injected, repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK
+    assert injected.closed is False
+
+
+def test_run_closes_owned_client_even_when_halted(monkeypatch):
+    # close() runs on the failure/halt paths too (finally), not only on success.
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "red", None),  # halt at start
+    })
+    owned = _ClosableFakeMemory()
+    monkeypatch.setattr("kagura_engineer.run.resolve_memory_client", lambda cfg: owned)
+    report = run_idea(_cfg(), 42, repo_root=Path("/repo"))
+    assert report.status is RunStatus.BLOCKED
+    assert owned.closed is True
+
+
+def test_run_owned_client_without_close_is_safe(monkeypatch):
+    # A client with no close() (e.g. LocalMemoryClient) must not crash the run.
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+    monkeypatch.setattr("kagura_engineer.run.resolve_memory_client", lambda cfg: _FakeMemory())
+    report = run_idea(_cfg(), 42, repo_root=Path("/repo"))  # _FakeMemory has no close()
+    assert report.status is RunStatus.OK
