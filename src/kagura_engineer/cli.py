@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import typer
 
+from . import __version__
 from .config import ConfigError, load_config
 from .doctor.registry import overall_status, run_all
 from .doctor.render import print_table, to_json
@@ -25,6 +26,25 @@ from .setup.render import to_json as setup_to_json
 app = typer.Typer(help="Autonomous coding harness over Claude Code + Kagura Memory.")
 
 _CONFIG_OPT = typer.Option("repo.yaml", "--config", "-c", help="path to repo.yaml")
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(__version__)
+        raise typer.Exit()
+
+
+@app.callback()
+def _main(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        help="Show the kagura-engineer version and exit.",
+        callback=_version_callback,
+        is_eager=True,
+    ),
+) -> None:
+    """Autonomous coding harness over Claude Code + Kagura Memory."""
 
 
 # ---------------------------------------------------------------------------

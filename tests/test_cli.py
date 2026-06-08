@@ -34,6 +34,14 @@ def test_help_lists_commands():
         assert cmd in result.stdout
 
 
+def test_version_flag_prints_version():
+    from kagura_engineer import __version__
+
+    result = runner.invoke(app, ["--version"])
+    assert result.exit_code == 0
+    assert __version__ in result.stdout
+
+
 def test_doctor_json_all_ok(write_cfg, monkeypatch):
     monkeypatch.setattr(
         "kagura_engineer.cli.run_all",

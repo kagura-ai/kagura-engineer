@@ -23,7 +23,7 @@ chain and a `setup` that resolves it.
 | **Plan 4** | `review` — launch the reviewer, gate on its JSON verdict | ✅ done |
 | **Plan 4b** | `review --fix` — auto-review/fix loop | ✅ done |
 | **Plan 5** | `LocalMemoryClient` — offline SQLite memory backend | ✅ done |
-| Plan 5+ | rich graph/feedback/Sleep usage, memory auto-store, worktree runs | 📋 planned |
+| Plan 5+ | rich graph/feedback/Sleep, memory auto-store, worktree runs — **Memory Cloud required** | 📋 planned |
 
 `doctor`, `setup`, `run`, `review`, and `goal` are runnable now (363 tests green).
 
@@ -35,19 +35,38 @@ Requires **Python ≥ 3.11**.
 
 ### As a tool (recommended)
 
-Not published to public PyPI (yet) — install straight from the repository
-(or, later, a private index). `uv` and `pipx` pull from git just as they would
-from an index; `uv` will also fetch a suitable Python for you.
+Published on [PyPI](https://pypi.org/project/kagura-engineer/). `uv` will also
+fetch a suitable Python for you.
 
 ```bash
 # uv (also bootstraps Python 3.11 if needed)
-uv tool install git+ssh://git@github.com/kagura-ai/kagura-engineer.git
+uv tool install kagura-engineer
 
 # or pipx
-pipx install git+ssh://git@github.com/kagura-ai/kagura-engineer.git
+pipx install kagura-engineer
+
+# or plain pip
+pip install kagura-engineer
 ```
 
-Pin a version with a tag: `…kagura-engineer.git@v0.1.0`.
+The `review` command shells out to the separate
+[`kagura-code-reviewer`](https://github.com/kagura-ai/kagura-code-reviewer)
+console script. Pull it in alongside the harness with the `review` extra:
+
+```bash
+uv tool install "kagura-engineer[review]"
+```
+
+(`kagura-engineer setup` can also bootstrap it later; without it, `review`
+degrades to a clean FAIL gate.)
+
+To install straight from the repository instead — e.g. an unreleased commit:
+
+```bash
+uv tool install git+ssh://git@github.com/kagura-ai/kagura-engineer.git
+```
+
+Pin a version with a tag: `pip install kagura-engineer==0.1.0`.
 
 ### For development (from a checkout)
 
@@ -66,9 +85,9 @@ Every command reads a `repo.yaml` (override with `--config / -c`):
 
 ```yaml
 profile: coding                                   # required
-memory_cloud_url: https://memory.kagura-ai.com    # required
-workspace_id: ws_xxxxxxxx                          # required — Memory Cloud scope
-context_id: 00000000-0000-0000-0000-000000000000  # required — context within the workspace
+memory_cloud_url: https://memory.kagura-ai.com    # required for cloud backend
+workspace_id: ws_xxxxxxxx                          # required for cloud backend — Memory Cloud scope
+context_id: 00000000-0000-0000-0000-000000000000  # required for cloud backend — context within the workspace
 ollama_url: http://localhost:11434                 # optional (default shown)
 memory_backend: cloud                              # optional: cloud | local (default: cloud)
 local_memory_path: .kagura/memory.db               # optional (used only when backend=local)
@@ -80,13 +99,21 @@ review:
 
 `workspace_id → context_id → memory` is the Memory Cloud filter hierarchy.
 A missing required field, unparseable YAML, or an unreadable file fails with a
-clean error and **exit code 2**.
+clean error and **exit code 2**. With `memory_backend: local` the three
+Cloud-only fields may be omitted — an offline `repo.yaml` is just `profile` +
+`memory_backend: local`.
 
-**Memory backend (Plan 5).** `memory_backend: local` switches `run`/`review`
-grounding to an offline SQLite store (`local_memory_path`, stdlib `sqlite3` —
-no API key, no network). It implements the same client Protocol as the Kagura
-Memory Cloud backend; offline recall is a keyword-overlap match (no embeddings),
-and pinning stays a Cloud-only feature. Use it to run fully offline or in CI.
+**Memory backend.** Memory Cloud is the recommended default and is **free to
+start** — install the `kagura` CLI and run `kagura auth login` (both free) and
+`run`/`review` are grounded immediately. The richer capabilities — graph
+discovery, feedback reinforcement, Sleep consolidation, memory auto-store, and
+worktree runs (Plan 5+) — **require Memory Cloud**.
+
+For offline or CI use, `memory_backend: local` switches the **basic** `run`/
+`review` grounding to an offline SQLite store (`local_memory_path`, stdlib
+`sqlite3` — no API key, no network). It implements the same client Protocol;
+offline recall is a keyword-overlap match (no embeddings). The local backend
+covers the basic grounding loop only — the Plan 5+ features stay Cloud-only.
 
 **In-task memory MCP.** By default the harness *string-injects* recalled memory
 into each headless `claude -p` prompt. Set `memory_mcp_config` to a Claude Code

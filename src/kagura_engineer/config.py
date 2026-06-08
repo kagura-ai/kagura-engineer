@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 
 class ConfigError(Exception):
@@ -18,12 +18,15 @@ class ReviewConfig(BaseModel):
 
 class Config(BaseModel):
     profile: str
-    memory_cloud_url: str
+    # Cloud-only fields. Optional at the field level so an offline
+    # (memory_backend=local) repo.yaml needs no Memory Cloud credentials; the
+    # model validator below re-requires them when memory_backend == "cloud".
+    memory_cloud_url: str = ""
     # Memory Cloud filter hierarchy: workspace_id -> context_id -> memory.
     # workspace_id scopes all memory writes/recalls for this project; the
     # API key (resolved at the client layer) is also workspace-scoped.
-    workspace_id: str
-    context_id: str
+    workspace_id: str = ""
+    context_id: str = ""
     ollama_url: str = "http://localhost:11434"
     review: ReviewConfig = Field(default_factory=ReviewConfig)
     # Memory backend: "cloud" (Kagura Memory Cloud SDK) or "local" (offline
@@ -35,6 +38,26 @@ class Config(BaseModel):
     # the memory MCP tools attached for in-task recall (default: string injection
     # only). The server's tools must be permitted in your Claude settings.
     memory_mcp_config: str | None = None
+
+    @model_validator(mode="after")
+    def _require_cloud_fields(self) -> "Config":
+        """Re-require the Cloud-only fields when the backend is the Cloud.
+
+        They default to "" at the field level (so a local-backend repo.yaml
+        needs no credentials); the cloud backend cannot function without them,
+        so demand them here with a clear message instead of failing later.
+        """
+        if self.memory_backend == "cloud":
+            missing = [
+                name
+                for name in ("memory_cloud_url", "workspace_id", "context_id")
+                if not getattr(self, name)
+            ]
+            if missing:
+                raise ValueError(
+                    "memory_backend='cloud' requires: " + ", ".join(missing)
+                )
+        return self
 
 
 def load_config(path: str | Path) -> Config:

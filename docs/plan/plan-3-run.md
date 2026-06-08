@@ -16,7 +16,7 @@
 ### 0.2 指導原則(この設計の背骨)
 
 1. **bounded composable + 単一 orchestrator**
-   3 層 coding harness(decision `c2a7e94e`): actor=`kagura-engineer`(proprietary) / workflow=`gh-issue-driven`(MIT, 明示依存) / persistence=`memory-cloud`。
+   3 層 coding harness(decision `c2a7e94e`): actor=`kagura-engineer`(Apache-2.0) / workflow=`gh-issue-driven`(MIT, 明示依存) / persistence=`memory-cloud`。
    **`run` は他 agent(reviewer / planner)を束ねない。** workflow=gh-issue-driven が唯一の orchestration 層であり、`run` はそれを起動する actor 側ループ。reviewer(別プロダクト `kagura-code-reviewer`)は PR 後に *別起動* で引き継ぐ — `run` は呼ばない。
 
 2. **`run` = memory-grounded agent loop**

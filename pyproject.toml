@@ -6,25 +6,66 @@ build-backend = "hatchling.build"
 name = "kagura-engineer"
 version = "0.1.0"
 description = "Autonomous coding harness over Claude Code + Kagura Memory"
+readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Kagura AI" }]
+keywords = [
+    "claude-code",
+    "ai-agent",
+    "coding-agent",
+    "autonomous-agent",
+    "kagura",
+    "memory",
+    "llm",
+    "harness",
+    "developer-tools",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Code Generators",
+]
 dependencies = [
     "typer>=0.12",
     "rich>=13.7",
     "pydantic>=2.7",
     "pyyaml>=6.0",
-    "kagura-memory>=0.29",
+    "kagura-memory>=0.29,<0.30",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-cov>=5.0"]
+# The `review` command shells out to the kagura-code-reviewer console script.
+# It is the one runtime dependency that lives on PyPI (claude/gh/ollama do not),
+# so it is offered as an opt-in extra. Without it, `review` degrades to a clean
+# FAIL gate. `kagura-engineer setup` can also bootstrap it.
+review = ["kagura-code-reviewer"]
+
+[project.urls]
+Homepage = "https://github.com/kagura-ai/kagura-engineer"
+Repository = "https://github.com/kagura-ai/kagura-engineer"
+Issues = "https://github.com/kagura-ai/kagura-engineer/issues"
+Changelog = "https://github.com/kagura-ai/kagura-engineer/blob/main/CHANGELOG.md"
 
 [project.scripts]
 kagura-engineer = "kagura_engineer.cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/kagura_engineer"]
+
+[tool.hatch.build.targets.sdist]
+# Keep internal design/planning docs out of the published artifact.
+exclude = ["/docs"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

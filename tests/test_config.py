@@ -59,6 +59,24 @@ def test_context_id_is_required(tmp_path, valid_repo_yaml_text):
         load_config(p)
 
 
+def test_local_backend_allows_missing_cloud_fields(tmp_path):
+    # With memory_backend=local the harness never touches Memory Cloud, so the
+    # Cloud-only fields (memory_cloud_url/workspace_id/context_id) are optional.
+    p = tmp_path / "repo.yaml"
+    p.write_text("profile: coding\nmemory_backend: local\n")
+    cfg = load_config(p)
+    assert cfg.memory_backend == "local"
+    assert cfg.profile == "coding"
+
+
+def test_cloud_backend_requires_cloud_fields(tmp_path):
+    # Default backend is cloud → the Cloud fields stay mandatory.
+    p = tmp_path / "repo.yaml"
+    p.write_text("profile: coding\n")
+    with pytest.raises(ConfigError):
+        load_config(p)
+
+
 def test_missing_file_raises(tmp_path):
     with pytest.raises(ConfigError):
         load_config(tmp_path / "nope.yaml")

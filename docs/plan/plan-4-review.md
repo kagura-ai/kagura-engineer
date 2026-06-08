@@ -12,7 +12,7 @@
 
 ## Contract (source of truth)
 
-The reviewer side (`~/works/kagura-code-reviewer`, R1–R5 complete, 138 tests green) guarantees:
+The reviewer side (the separate `kagura-code-reviewer` project) guarantees:
 
 - **CLI:** `kagura-code-reviewer --base <ref> --head <ref> --repo <path> --format json --out <file> [--context-file <path>] [--effort low|med|high] [--model <alias>]`
 - **JSON envelope** (`schema_version: 1`):
