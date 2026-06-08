@@ -26,7 +26,7 @@ basic loop.
 | **Plan 4** | `review` — launch the reviewer, gate on its JSON verdict | ✅ done |
 | **Plan 4b** | `review --fix` — auto-review/fix loop | ✅ done |
 | **Plan 5** | `LocalMemoryClient` — offline SQLite memory backend | ✅ done |
-| Plan 5+ | rich graph/feedback/Sleep, memory auto-store, worktree runs — **Memory Cloud required** | 📋 planned |
+| Plan 5+ | failover memory (Cloud-primary + local WAL) ✅ done; rich graph/feedback/Sleep on both backends (local = approximation, Cloud = full); memory auto-store 📋 planned | 🔄 partial |
 
 `doctor`, `setup`, `run`, `review`, and `goal` are runnable now (390 tests green).
 
@@ -119,15 +119,25 @@ When `KAGURA_API_KEY` is set it takes precedence; otherwise the `kagura auth
 login` profile is used. `doctor` and `setup` both check that one of these
 resolves and guide you if neither does — a reachable host with no credential is
 flagged, not silently passed. With a credential in place `run`/`review` are
-grounded immediately. The richer capabilities — graph discovery, feedback
-reinforcement, Sleep consolidation, memory auto-store, and worktree runs
-(Plan 5+) — **require Memory Cloud**.
+grounded immediately. **Memory Cloud is the primary store and the moat.** The local SQLite backend is
+the offline/dev tier: it implements the same `MemoryClient` interface with
+*approximations* of the rich features (tag-overlap `explore` for graph,
+importance-bump `feedback`, `decay` for Sleep-adjacent maintenance), while Memory
+Cloud provides the full Hebbian reinforcement, neural-graph, and server-side Sleep
+consolidation.
 
-For offline or CI use, `memory_backend: local` switches the **basic** `run`/
-`review` grounding to an offline SQLite store (`local_memory_path`, stdlib
-`sqlite3` — no API key, no network). It implements the same client Protocol;
-offline recall is a keyword-overlap match (no embeddings). The local backend
-covers the basic grounding loop only — the Plan 5+ features stay Cloud-only.
+When the cloud backend is active, critical writes (savepoint `remember` and
+`set_state`) that fail during a Cloud outage are buffered to a local write-ahead
+log and **replayed to Cloud on the next run** — so Cloud stays the source of
+truth without losing a run's progress to a transient outage.
+
+The one genuinely planned Plan 5+ item is **memory auto-store / failure-mode
+learning** (see `docs/superpowers/plans/2026-06-08-memory-auto-store.md`).
+
+For offline or CI use, `memory_backend: local` switches the `run`/`review`
+grounding to an offline SQLite store (`local_memory_path`, stdlib `sqlite3` — no
+API key, no network). It implements the same client Protocol; offline recall is a
+keyword-overlap match (no embeddings).
 
 **In-task memory MCP.** By default the harness *string-injects* recalled memory
 into each headless `claude -p` prompt. Set `memory_mcp_config` to a Claude Code
