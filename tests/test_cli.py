@@ -239,6 +239,39 @@ def test_run_no_remember_propagates(write_cfg, monkeypatch):
     assert captured.get("no_remember") is True
 
 
+def test_run_streams_progress_to_stdout(write_cfg, monkeypatch):
+    # issue #12: the run prints incremental phase progress (the sink it passes
+    # to run_idea) to stdout, before the final table.
+    from kagura_engineer.run.result import RunStatus
+
+    def _fake(cfg, issue, *, progress=None, **kw):
+        if progress is not None:
+            progress("▶ start …")
+        return _stub_run_report(RunStatus.OK)
+
+    monkeypatch.setattr("kagura_engineer.cli.run_idea", _fake)
+    result = runner.invoke(app, ["run", "42", "--config", str(write_cfg)])
+    assert result.exit_code == 0
+    assert "▶ start" in result.stdout
+
+
+def test_run_json_does_not_stream_progress(write_cfg, monkeypatch):
+    # In --json mode the progress sink must stay silent so stdout is clean JSON.
+    import json
+    from kagura_engineer.run.result import RunStatus
+
+    def _fake(cfg, issue, *, progress=None, **kw):
+        if progress is not None:
+            progress("▶ start …")  # would corrupt the JSON if printed
+        return _stub_run_report(RunStatus.OK)
+
+    monkeypatch.setattr("kagura_engineer.cli.run_idea", _fake)
+    result = runner.invoke(app, ["run", "42", "--config", str(write_cfg), "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)  # parses → no progress leaked into stdout
+    assert data["issue"] == 42
+
+
 def test_run_missing_config_clean_error(tmp_path):
     missing = tmp_path / "nope.yaml"
     result = runner.invoke(app, ["run", "42", "--config", str(missing)])

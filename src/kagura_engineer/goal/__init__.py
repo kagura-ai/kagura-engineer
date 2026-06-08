@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 
 from ..config import Config
-from ..run import STATUS_EXIT, run_idea
+from ..run import STATUS_EXIT, ProgressSink, run_idea
 from ..run.memory import MemoryClient, resolve_memory_client
 from ..run.result import RunStatus
 from .issues import list_milestone_issues
@@ -36,6 +36,7 @@ def run_milestone(
     unattended: bool = False,
     memory: MemoryClient | None = None,
     repo_root: Path | None = None,
+    progress: ProgressSink | None = None,
 ) -> GoalReport:
     started = time.monotonic()
     # The milestone owns ONE memory client across all its issues (passed to each
@@ -66,8 +67,14 @@ def run_milestone(
     owns_mem = memory is None
     reports = []
     for issue in issues:
+        # issue #12: forward a per-issue progress sink so a whole-milestone run is
+        # not silent — each run_idea line is prefixed with the issue it belongs to.
+        issue_progress = (
+            (lambda line, _i=issue: progress(f"#{_i} {line}"))
+            if progress is not None else None
+        )
         rep = run_idea(cfg, issue, no_remember=no_remember, unattended=unattended,
-                       memory=mem, repo_root=repo_root)
+                       memory=mem, repo_root=repo_root, progress=issue_progress)
         reports.append(rep)
         if rep.status is not RunStatus.OK:
             # Halt the milestone at the first issue needing a human; resumable.
