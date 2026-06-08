@@ -27,6 +27,15 @@ class RunStatus(enum.Enum):
 
 _WORST = {RunStatus.OK: 0, RunStatus.BLOCKED: 1, RunStatus.FAIL: 2}
 
+# Single source of truth for the per-status glyph, shared by the rich table
+# renderers (run/render.py, goal/render.py) and the issue #12 progress stream
+# (run/__init__.py) so the streamed marker and the final table never drift.
+STATUS_ICON: dict[RunStatus, str] = {
+    RunStatus.OK: "✅",
+    RunStatus.BLOCKED: "⏸",
+    RunStatus.FAIL: "❌",
+}
+
 
 @dataclass(frozen=True)
 class PhaseResult:

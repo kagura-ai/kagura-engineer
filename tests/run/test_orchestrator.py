@@ -429,6 +429,33 @@ def test_ship_green_without_pr_url_is_fail(monkeypatch):
     assert not any(t == "savepoint" for t, _ in mem.remembered)  # persist never ran
 
 
+def test_ship_guard_checks_ships_own_url_not_an_earlier_phase(monkeypatch):
+    # The guard must check ship's OWN artifact (inv.pr_url), not the accumulated
+    # pr_url — a stray URL emitted by an earlier phase must not mask a ship that
+    # produced none. (review follow-up for #18.)
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "implement": PhaseInvocation("implement", 0, "", "", "green", "https://x/pull/99"),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", None),  # ship itself: no URL
+    })
+    shas = iter(["before", "after"])  # implement produced a commit
+    monkeypatch.setattr("kagura_engineer.run.head_rev", lambda wt: next(shas))
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.FAIL  # NOT masked by the earlier URL
+    assert report.phases[-1].name == "ship"
+
+
+def test_phase_fail_with_no_output_is_not_opaque(monkeypatch):
+    # issue #19 follow-up: when claude exits non-zero with BOTH streams empty, the
+    # detail must say something rather than a bare "claude exited 1:".
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 1, "", "", None, None),
+    })
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.FAIL
+    assert "no output captured" in report.phases[-1].detail.lower()
+
+
 # --- issue #14: close the memory client we own (cloud loop hangs otherwise) ---
 
 

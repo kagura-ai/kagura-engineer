@@ -40,10 +40,17 @@ otherwise make the primary marker stricter than the secondary native line.
 Deferred (issue #3 acceptance criterion 3): the `KAGURA_PR_URL=` marker-drop on
 ship is NOT given a native fallback here. There is no blessed secondary contract
 for a PR URL the way `## Verdict:` is for the verdict — scraping a URL out of
-free-form prose would be exactly the format-coupling this module avoids. A
-ship run that produces a PR but drops the marker reports pr_url=None; the gate
-still proceeds on the verdict, and `kagura-engineer run <issue>` is resumable.
-Revisit only if a structured PR-URL contract emerges upstream.
+free-form prose would be exactly the format-coupling this module avoids. A ship
+run that drops the marker reports pr_url=None.
+
+Note (issue #18): the orchestrator now treats a green ship with pr_url=None as a
+FAIL, not a proceed — the dogfooded failure mode was a ship that went green yet
+never pushed a branch or opened a PR (a false success). A genuinely-shipped PR
+whose marker was merely dropped is the rarer case, and is recoverable: re-running
+`kagura-engineer run <issue>` resumes, and gh-issue-driven:ship is idempotent
+against an already-open PR. So the conservative FAIL is preferred over a proceed
+that might claim a PR that does not exist. Revisit (e.g. verify the PR directly)
+only if a structured PR-URL contract emerges upstream.
 
 Phases are separate `claude -p` calls because gh-issue-driven checkpoints
 to the branch + memory between phases, so each call resumes cleanly.

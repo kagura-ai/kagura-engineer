@@ -6,14 +6,8 @@ import json
 from rich.console import Console
 from rich.table import Table
 
-from ..run.result import RunStatus
+from ..run.result import STATUS_ICON as _ICON
 from .result import GoalReport
-
-_ICON: dict[RunStatus, str] = {
-    RunStatus.OK: "✅",
-    RunStatus.BLOCKED: "⏸",
-    RunStatus.FAIL: "❌",
-}
 
 
 def to_json(report: GoalReport) -> str:
