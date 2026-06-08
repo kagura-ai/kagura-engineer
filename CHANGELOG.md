@@ -8,6 +8,24 @@ While the project is in `0.x`, minor versions may carry breaking changes.
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-06-09
+
+### Fixed
+
+- `doctor` / `setup`: the Memory Cloud `/health` probe now sends a
+  `User-Agent` (`kagura-engineer/<version>`). Cloudflare blocks the stdlib
+  default `Python-urllib/x` signature with HTTP 403 (CF error 1010), which made
+  a perfectly healthy Memory Cloud host look unreachable.
+- `doctor`: a Claude model name (`haiku` / `sonnet` / `opus` / `claude-*`) in
+  `review.models` no longer suggests the impossible `ollama pull <name>` — it
+  explains that `review.models` lists **Ollama** model names for the reviewer.
+
+### Changed
+
+- Skill wrappers now carry usage help: `kagura-engineer:run` and `:goal` print
+  a usage block (with an example) when invoked without their required argument
+  instead of guessing; `:review` / `:doctor` / `:setup` show a one-line usage.
+
 ## [0.2.0] — 2026-06-09
 
 ### Added
@@ -76,6 +94,7 @@ First public release. `kagura-engineer` is a `0.x` autonomous coding harness ove
   just `profile` + `memory_backend: local`. They stay required for the (default)
   cloud backend.
 
-[Unreleased]: https://github.com/kagura-ai/kagura-engineer/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/kagura-ai/kagura-engineer/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/kagura-ai/kagura-engineer/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/kagura-ai/kagura-engineer/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/kagura-ai/kagura-engineer/releases/tag/v0.1.0

@@ -147,6 +147,25 @@ def test_skill_runs_doctor_precondition(verb):
     assert "kagura-engineer doctor" in text, f"{verb}: must run doctor as a precondition"
 
 
+@pytest.mark.parametrize("verb", EXPECTED_SKILLS)
+def test_skill_has_usage_affordance(verb):
+    _, text = _frontmatter(SKILLS_DIR / verb / "SKILL.md")
+    # Every skill must show how to invoke it (a "Usage:" line or, for the
+    # required-arg skills, a "No-argument usage" placeholder-help section).
+    assert ("Usage:" in text) or ("No-argument usage" in text), (
+        f"{verb}: no usage affordance"
+    )
+
+
+@pytest.mark.parametrize("verb", ["run", "goal"])
+def test_required_arg_skill_has_placeholder_help(verb):
+    _, text = _frontmatter(SKILLS_DIR / verb / "SKILL.md")
+    # run/goal take a required argument — they must instruct "no arg → print
+    # usage and stop" rather than guessing/shelling out, and show an example.
+    assert "No-argument usage" in text, f"{verb}: missing placeholder-help section"
+    assert "Example:" in text, f"{verb}: placeholder help should show an Example"
+
+
 @pytest.mark.parametrize("verb", HARNESS_SKILLS)
 def test_harness_skill_warns(verb):
     _, text = _frontmatter(SKILLS_DIR / verb / "SKILL.md")

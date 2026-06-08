@@ -25,6 +25,8 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
+from .._http import build_request
+
 from .memory_auth import MemoryAuthMethod, resolve_memory_cloud_auth
 from .result import StepResult, StepStatus
 
@@ -74,7 +76,8 @@ def ensure_memory_cloud_reachable(
 
     url = f"{base_url.rstrip('/')}/health"
     try:
-        with urllib.request.urlopen(url, timeout=_PROBE_TIMEOUT_S) as resp:
+        # build_request sets a User-Agent — Cloudflare 403s the stdlib default (see _http.py).
+        with urllib.request.urlopen(build_request(url), timeout=_PROBE_TIMEOUT_S) as resp:
             # 2xx is the success path; we do not currently parse the
             # body (the doctor's reachability probe is body-agnostic,
             # and setup mirrors that).

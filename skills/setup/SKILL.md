@@ -11,6 +11,8 @@ installed CLI and surfaces the result.
 
 **Announce:** "Using the kagura-engineer:setup skill to prepare the harness environment."
 
+Usage: `kagura-engineer:setup` — no arguments. Add `--fix <step>` to repair one step, `--dry-run` to preview.
+
 > Note: `setup` installs/authenticates **tooling**. It does **not** create `repo.yaml`
 > for you — author that file first (backend choice, workspace/context ids). Setup may
 > prompt for credentials unless run with `--no-input`.
