@@ -73,3 +73,11 @@ exclude = ["/docs"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["src/kagura_engineer"]
+
+[tool.coverage.report]
+# A floor well below the current 96% — guards against silent erosion without
+# being brittle. Raise as coverage climbs.
+fail_under = 90
