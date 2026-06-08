@@ -124,6 +124,36 @@ def test_parse_verdict_default_phase_is_pass_fail_blind():
     assert workflow.parse_verdict("## Verdict: fail") is None
 
 
+def test_parse_verdict_ship_marker_pass_maps_to_green():
+    # The primary KAGURA_VERDICT= marker must not be stricter than the native
+    # fallback: a ship marker emitted in gate2's own pass|fail vocabulary
+    # (despite the green|yellow|red hint) is normalised, not false-halted.
+    assert workflow.parse_verdict("KAGURA_VERDICT=pass\n", phase="ship") == "green"
+
+
+def test_parse_verdict_ship_marker_fail_maps_to_red():
+    assert workflow.parse_verdict("KAGURA_VERDICT=fail\n", phase="ship") == "red"
+
+
+def test_parse_verdict_ship_marker_green_unchanged():
+    # green|yellow|red markers pass through the ship normalisation untouched.
+    assert workflow.parse_verdict("KAGURA_VERDICT=yellow\n", phase="ship") == "yellow"
+
+
+def test_parse_verdict_gate1_marker_does_not_map_pass():
+    # The marker normalisation is phase-gated too: a start-phase `pass` marker
+    # stays the raw (gate-halting) token, never green.
+    assert workflow.parse_verdict("KAGURA_VERDICT=pass\n", phase="start") == "pass"
+
+
+def test_invoke_phase_ship_marker_fail_resolves_to_red(monkeypatch, tmp_path):
+    def _run(cmd, **kw):
+        return subprocess.CompletedProcess(cmd, 0, "gate2 blocked\nKAGURA_VERDICT=fail\n", "")
+
+    monkeypatch.setattr(workflow.subprocess, "run", _run)
+    assert workflow.invoke_phase("ship", 3, tmp_path, []).verdict == "red"
+
+
 def test_invoke_phase_ship_native_pass_resolves_to_green(monkeypatch, tmp_path):
     # End-to-end: a ship phase that drops the marker but closes `## Verdict: pass`
     # must resolve to a proceed verdict, not halt.

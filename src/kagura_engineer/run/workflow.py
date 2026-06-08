@@ -31,8 +31,11 @@ additionally recognises native `## Verdict: pass`/`fail`, mapping pass→green
 gate2 (the default) closes with green|yellow|red and keeps working unchanged.
 Every non-ship phase stays pass|fail-blind, so the mapping can never leak into
 gate1. The `KAGURA_VERDICT=` marker stays primary across all phases (it is
-always requested as green|yellow|red), so this only widens the secondary
-native-line fallback, never the marker contract.
+checked first); for the ship phase the same pass→green / fail→red normalisation
+is applied to the marker as well as the native line, so a ship run that emits
+`KAGURA_VERDICT=pass` in gate2's own vocabulary (despite the green|yellow|red
+hint) proceeds rather than false-halting — closing the parallel hole that would
+otherwise make the primary marker stricter than the secondary native line.
 
 Deferred (issue #3 acceptance criterion 3): the `KAGURA_PR_URL=` marker-drop on
 ship is NOT given a native fallback here. There is no blessed secondary contract
@@ -129,21 +132,24 @@ def build_prompt(
 
 
 def parse_verdict(text: str, phase: str | None = None) -> str | None:
+    # The ship phase speaks gate2's `pass|fail` vocabulary (issue #3): normalise
+    # pass→green / fail→red on BOTH the primary marker and the secondary native
+    # line. Applying it to the marker too closes the parallel false-halt hole —
+    # a ship run that emits `KAGURA_VERDICT=pass` (gate2's own token, despite the
+    # green|yellow|red hint) must proceed, not halt, exactly like a native
+    # `## Verdict: pass` does. Every non-ship phase leaves the token untouched,
+    # so the mapping can never leak into gate1.
+    normalise = (
+        (lambda v: _SHIP_VERDICT_MAP.get(v, v)) if phase == "ship" else (lambda v: v)
+    )
     matches = _VERDICT_RE.findall(text or "")
     if matches:
-        return matches[-1].lower()
-    # Marker absent → fall back to the native `## Verdict:` line (issue #2).
-    # The ship phase additionally honours gate2's `pass|fail` vocabulary
-    # (issue #3), mapping pass→green / fail→red; every other phase stays
-    # green|yellow|red-only so the mapping cannot leak into gate1.
-    if phase == "ship":
-        native = _NATIVE_SHIP_VERDICT_RE.findall(text or "")
-        if not native:
-            return None
-        verdict = native[-1].lower()
-        return _SHIP_VERDICT_MAP.get(verdict, verdict)
-    native = _NATIVE_VERDICT_RE.findall(text or "")
-    return native[-1].lower() if native else None
+        return normalise(matches[-1].lower())
+    # Marker absent → fall back to the native `## Verdict:` line (issue #2),
+    # widened to the ship vocabulary for the ship phase (issue #3).
+    native_re = _NATIVE_SHIP_VERDICT_RE if phase == "ship" else _NATIVE_VERDICT_RE
+    native = native_re.findall(text or "")
+    return normalise(native[-1].lower()) if native else None
 
 
 def parse_pr_url(text: str) -> str | None:
