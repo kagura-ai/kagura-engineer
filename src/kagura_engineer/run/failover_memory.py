@@ -61,6 +61,7 @@ class FailoverMemoryClient:
     def get_state(self, context_id: str, key: str) -> dict | None:
         return self._inner.get_state(context_id, key)
 
+    # --- lifecycle -----------------------------------------------------------
     def close(self) -> None:
         closer = getattr(self._inner, "close", None)
         if closer is not None:

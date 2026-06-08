@@ -56,6 +56,15 @@ def test_reads_delegate_to_inner(tmp_path):
     assert c.recall_detailed("ctx", "q") == [("m1", "r")]
     assert c.explore("ctx", "m1") == []
     assert c.get_state("ctx", "run:1") == {"k": "run:1"}
+    assert [m for m, _ in c._inner.calls] == [
+        "load_pinned", "recall", "recall_detailed", "explore", "get_state",
+    ]
+
+
+def test_close_delegates_to_inner(tmp_path):
+    inner = _FakeInner()
+    FailoverMemoryClient(inner, tmp_path / "wal.jsonl").close()
+    assert inner.closed is True
 
 
 def test_read_failure_propagates(tmp_path):
