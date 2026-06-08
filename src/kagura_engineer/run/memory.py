@@ -164,11 +164,14 @@ class KaguraCloudClient:
         ]
 
     def feedback(self, context_id: str, memory_id: str, *, weight: float = 1.0) -> None:
-        # SDK passthrough — reinforce the memory's neural weight. The offline
-        # suite exercises this against an async fake SDK (kagura-memory is a
-        # declared dependency, kagura-memory>=0.29,<0.30); the contract mirrors
-        # the mcp `feedback` tool.
-        self._run(self._sdk.feedback(context_id, memory_id=memory_id, weight=weight))
+        # The real kagura-memory 0.29 SDK is helpful-based, not weight-based:
+        #   feedback(context_id, memory_id, helpful, *, query=None, note=None)
+        # Map the Protocol's reinforcement intent (a positive `weight`) onto the
+        # SDK's `helpful` contract — issue #16. Passing `weight=` raised
+        # TypeError, silently killing cloud reinforcement once per recalled
+        # memory. The offline fake (tests/run/test_memory.py) mirrors the REAL
+        # signature so a regression back to `weight=` fails CI.
+        self._run(self._sdk.feedback(context_id, memory_id, helpful=weight > 0))
 
     def pin(self, context_id: str, memory_id: str) -> None:
         self._run(self._sdk.update_memory(context_id, memory_id=memory_id, delivery_mode="always"))
