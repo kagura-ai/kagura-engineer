@@ -67,8 +67,11 @@ path = "src/kagura_engineer/__init__.py"
 packages = ["src/kagura_engineer"]
 
 [tool.hatch.build.targets.sdist]
-# Keep internal design/planning docs out of the published artifact.
-exclude = ["/docs"]
+# Keep internal design/planning docs and the Claude Code plugin wrapper out of
+# the published artifact. The plugin (.claude-plugin/ + skills/) is distributed
+# via git (kagura-plugins marketplace), not PyPI; the wheel already excludes it
+# by packaging only src/kagura_engineer.
+exclude = ["/docs", "/skills", "/.claude-plugin"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
