@@ -16,22 +16,6 @@ basic loop.
 
 ---
 
-## Status
-
-| Phase | Scope | State |
-|---|---|---|
-| **Plan 1** | `doctor` — diagnose the dependency chain | ✅ shipped |
-| **Plan 2** | `setup` — install + bootstrap the environment | ✅ shipped |
-| **Plan 3** | `run` — memory-grounded agent loop (issue→PR) | ✅ done |
-| **Plan 4** | `review` — launch the reviewer, gate on its JSON verdict | ✅ done |
-| **Plan 4b** | `review --fix` — auto-review/fix loop | ✅ done |
-| **Plan 5** | `LocalMemoryClient` — offline SQLite memory backend | ✅ done |
-| Plan 5+ | failover memory (Cloud-primary + local WAL) ✅ done; rich graph/feedback/Sleep on both backends (local = approximation, Cloud = full); memory auto-store 📋 planned | 🔄 partial |
-
-`doctor`, `setup`, `run`, `review`, and `goal` are runnable now (390 tests green).
-
----
-
 ## Install
 
 Requires **Python ≥ 3.11**.
@@ -350,11 +334,20 @@ kagura-engineer/
 
 ```bash
 pip install -e ".[dev]"
-pytest                         # 390 tests
+pytest                         # full suite
 ```
 
 `pyproject.toml` sets `pythonpath = ["src"]`, so `import kagura_engineer`
 resolves under pytest without an editable install.
+
+### Releasing
+
+The version lives in **`src/kagura_engineer/__init__.py`** — the canonical source,
+read by hatch for the wheel. The Claude Code plugin manifests
+`.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` mirror it.
+`/gh-issue-driven:tag` bumps the two manifests; **bump `__init__.py` to match in the
+same release**. `tests/test_plugin.py` asserts all three versions are equal, so a skew
+fails CI.
 
 ---
 
