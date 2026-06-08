@@ -161,6 +161,12 @@ class LocalMemoryClient:
         return cur.rowcount
 
     def feedback(self, context_id: str, memory_id: str, *, weight: float = 1.0) -> None:
+        # Contract (issue #21): weight > 0 reinforces; weight <= 0 is "no
+        # reinforcement" → no-op (no backend records negative feedback). Without
+        # this guard a negative weight would silently *decrement* importance,
+        # diverging from the cloud adapter's no-op.
+        if weight <= 0:
+            return
         # Reinforce: nudge importance toward 1.0 (capped). Importance is a
         # recall tie-breaker, so reinforced memories surface earlier next time.
         self._conn.execute(
