@@ -574,3 +574,44 @@ def test_progress_sink_is_optional(monkeypatch):
     })
     report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
     assert report.status is RunStatus.OK
+
+
+# --- failover: drain the WAL at run start ----------------------------------
+
+def test_run_drains_failover_client_at_start(monkeypatch):
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "implement": PhaseInvocation("implement", 0, "", "", "green", None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+    shas = iter(["before", "after"])
+    monkeypatch.setattr("kagura_engineer.run.head_rev", lambda wt: next(shas))
+
+    class _DrainMem(_FakeMemory):
+        def __init__(self):
+            super().__init__(); self.drained = 0
+        def drain(self):
+            self.drained += 1
+            return 0
+
+    mem = _DrainMem()
+    report = run_idea(_cfg(), 42, memory=mem, repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK
+    assert mem.drained == 1                              # drained exactly once at start
+
+
+def test_run_drain_failure_does_not_fail_run(monkeypatch):
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "implement": PhaseInvocation("implement", 0, "", "", "green", None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+    shas = iter(["before", "after"])
+    monkeypatch.setattr("kagura_engineer.run.head_rev", lambda wt: next(shas))
+
+    class _BoomDrain(_FakeMemory):
+        def drain(self):
+            raise RuntimeError("drain blew up")
+
+    report = run_idea(_cfg(), 42, memory=_BoomDrain(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK                 # drain failure is non-fatal

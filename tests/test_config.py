@@ -112,3 +112,18 @@ def test_valid_config_fixture_is_well_formed(valid_config):
     assert valid_config.profile == VALID_PROFILE
     assert valid_config.workspace_id == VALID_WORKSPACE
     assert valid_config.context_id == VALID_CONTEXT_UUID
+
+
+def test_memory_failover_defaults_true():
+    from kagura_engineer.config import Config
+    cfg = Config(profile="coding", memory_cloud_url="https://m", workspace_id="w", context_id="c")
+    assert cfg.memory_failover is True
+
+
+def test_memory_failover_can_be_disabled():
+    from kagura_engineer.config import Config
+    cfg = Config(
+        profile="coding", memory_cloud_url="https://m", workspace_id="w",
+        context_id="c", memory_failover=False,
+    )
+    assert cfg.memory_failover is False

@@ -136,6 +136,17 @@ def run_idea(
             resume_hint=resume_hint, duration_s=time.monotonic() - started,
         )
 
+    # Failover: replay any writes buffered during a prior Cloud outage before we
+    # start. getattr-guarded (only FailoverMemoryClient has drain), and fully
+    # best-effort — a drain failure must never fail the run; records stay in the
+    # WAL for the next attempt.
+    drainer = getattr(mem, "drain", None)
+    if drainer is not None:
+        try:
+            drainer()
+        except Exception:  # noqa: BLE001 — drain is best-effort
+            _log.exception("run failover drain failed (non-fatal)")
+
     # 0. guard — verify, do not auto-provision.
     blocking = [c for c in run_all(cfg) if c.is_blocking]
     if blocking:

@@ -153,10 +153,17 @@ def test_resolve_memory_client_local(tmp_path):
 
 def test_resolve_memory_client_cloud(monkeypatch, tmp_path):
     from kagura_engineer.run import memory as mem_mod
+    from kagura_engineer.run.failover_memory import FailoverMemoryClient
     sentinel = object()
     monkeypatch.setattr(mem_mod.KaguraCloudClient, "from_config",
                         classmethod(lambda cls, cfg: sentinel))
-    assert mem_mod.resolve_memory_client(_cfg_backend("cloud", tmp_path)) is sentinel
+    # With failover on (default), resolve wraps the cloud client.
+    client = mem_mod.resolve_memory_client(_cfg_backend("cloud", tmp_path))
+    assert isinstance(client, FailoverMemoryClient)
+    # With failover off, the bare cloud client is returned unchanged.
+    cfg_no_failover = _cfg_backend("cloud", tmp_path)
+    cfg_no_failover = cfg_no_failover.model_copy(update={"memory_failover": False})
+    assert mem_mod.resolve_memory_client(cfg_no_failover) is sentinel
 
 
 def test_invalid_memory_backend_raises_config_error(tmp_path):

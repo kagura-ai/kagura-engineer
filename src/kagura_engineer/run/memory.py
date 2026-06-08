@@ -224,10 +224,17 @@ class KaguraCloudClient:
 def resolve_memory_client(cfg: Config) -> MemoryClient:
     """Pick the memory backend from config: ``local`` → the offline SQLite
     ``LocalMemoryClient`` (no network, no API key); anything else → the Kagura
-    Memory Cloud SDK client. The orchestrators call this for their default
-    (non-injected) memory client so the backend is one config switch away."""
+    Memory Cloud SDK client, wrapped in a ``FailoverMemoryClient`` (unless
+    ``memory_failover`` is off) so critical writes survive a Cloud outage. The
+    orchestrators call this for their default (non-injected) memory client so the
+    backend is one config switch away."""
     if cfg.memory_backend == "local":
         from .local_memory import LocalMemoryClient
 
         return LocalMemoryClient(cfg.local_memory_path)
-    return KaguraCloudClient.from_config(cfg)
+    cloud = KaguraCloudClient.from_config(cfg)
+    if not cfg.memory_failover:
+        return cloud
+    from .failover_memory import FailoverMemoryClient, default_wal_path
+
+    return FailoverMemoryClient(cloud, default_wal_path(cfg.context_id))
