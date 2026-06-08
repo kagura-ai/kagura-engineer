@@ -188,11 +188,18 @@ def test_cloud_feedback_passthrough():
     seen = {}
 
     class _Sdk:
-        async def feedback(self, context_id, *, memory_id, weight):
-            seen.update(context_id=context_id, memory_id=memory_id, weight=weight)
+        # Real kagura-memory 0.29 SDK signature: helpful-based, no weight kwarg.
+        async def feedback(self, context_id, memory_id, helpful, *, query=None, note=None):
+            seen.update(context_id=context_id, memory_id=memory_id, helpful=helpful)
 
+    # A positive reinforcement weight maps to helpful=True; no weight kwarg leaks.
     KaguraCloudClient(_Sdk()).feedback("ctx", "m1", weight=2.0)
-    assert seen == {"context_id": "ctx", "memory_id": "m1", "weight": 2.0}
+    assert seen == {"context_id": "ctx", "memory_id": "m1", "helpful": True}
+
+    # Zero / negative reinforcement maps to helpful=False — locks the mapping.
+    seen.clear()
+    KaguraCloudClient(_Sdk()).feedback("ctx", "m1", weight=0.0)
+    assert seen == {"context_id": "ctx", "memory_id": "m1", "helpful": False}
 
 
 # --- Plan 5+: recall filters + pin/unpin on the cloud client ----------------
