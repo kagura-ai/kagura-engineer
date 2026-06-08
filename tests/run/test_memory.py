@@ -184,15 +184,37 @@ def test_cloud_recall_detailed_returns_pairs_and_recall_wraps():
     assert c.recall("ctx", "q") == ["S1", "no-id"]  # summary-only → keeps both
 
 
-def test_cloud_feedback_passthrough():
+def test_cloud_feedback_maps_weight_to_helpful():
+    # The real kagura-memory 0.29 SDK is helpful-based, NOT weight-based:
+    #   feedback(context_id, memory_id, helpful, *, query=None, note=None)
+    # The cloud adapter must map the Protocol's positive `weight` onto
+    # `helpful=True` and pass NO `weight` kwarg (issue #16). This fake mirrors
+    # the real signature so a regression back to `weight=` fails here.
     seen = {}
 
     class _Sdk:
-        async def feedback(self, context_id, *, memory_id, weight):
-            seen.update(context_id=context_id, memory_id=memory_id, weight=weight)
+        async def feedback(self, context_id, memory_id, helpful, *, query=None, note=None):
+            seen.update(
+                context_id=context_id, memory_id=memory_id,
+                helpful=helpful, query=query, note=note,
+            )
 
     KaguraCloudClient(_Sdk()).feedback("ctx", "m1", weight=2.0)
-    assert seen == {"context_id": "ctx", "memory_id": "m1", "weight": 2.0}
+    assert seen == {
+        "context_id": "ctx", "memory_id": "m1",
+        "helpful": True, "query": None, "note": None,
+    }
+
+
+def test_cloud_feedback_negative_weight_is_unhelpful():
+    seen = {}
+
+    class _Sdk:
+        async def feedback(self, context_id, memory_id, helpful, *, query=None, note=None):
+            seen["helpful"] = helpful
+
+    KaguraCloudClient(_Sdk()).feedback("ctx", "m1", weight=0.0)
+    assert seen["helpful"] is False
 
 
 # --- Plan 5+: recall filters + pin/unpin on the cloud client ----------------
