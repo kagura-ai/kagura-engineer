@@ -372,6 +372,30 @@ def test_implement_head_rev_unreadable_skips_check(monkeypatch):
     assert report.status is RunStatus.OK  # check skipped, ship proceeds
 
 
+# --- issue #18: a green ship with no PR URL is a false success ---------------
+
+
+def test_ship_green_without_pr_url_is_fail(monkeypatch):
+    # issue #18: ship self-reported green but produced NO PR URL — the branch was
+    # never pushed / no PR opened. The run must NOT report OK / exit 0 "PR reached".
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "implement": PhaseInvocation("implement", 0, "", "", "green", None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", None),  # green, no pr_url
+    })
+    shas = iter(["before", "after"])  # implement produced a commit
+    monkeypatch.setattr("kagura_engineer.run.head_rev", lambda wt: next(shas))
+    mem = _FakeMemory()
+    report = run_idea(_cfg(), 42, memory=mem, repo_root=Path("/repo"))
+    assert report.status is RunStatus.FAIL
+    assert STATUS_EXIT[report.status] != 0  # never a success exit
+    assert report.phases[-1].name == "ship"
+    assert "pr" in report.phases[-1].detail.lower()
+    assert report.pr_url is None
+    assert report.resume_hint  # tells the operator how to recover
+    assert not any(t == "savepoint" for t, _ in mem.remembered)  # persist never ran
+
+
 # --- issue #14: close the memory client we own (cloud loop hangs otherwise) ---
 
 
