@@ -206,15 +206,18 @@ def test_cloud_feedback_maps_weight_to_helpful():
     }
 
 
-def test_cloud_feedback_negative_weight_is_unhelpful():
+def test_cloud_feedback_nonpositive_weight_is_unhelpful():
+    # `helpful = weight > 0`, so any non-positive weight (zero AND negative)
+    # maps to helpful=False. Cover both boundaries — the threshold is the seam.
     seen = {}
 
     class _Sdk:
         async def feedback(self, context_id, memory_id, helpful, *, query=None, note=None):
             seen["helpful"] = helpful
 
-    KaguraCloudClient(_Sdk()).feedback("ctx", "m1", weight=0.0)
-    assert seen["helpful"] is False
+    for weight in (0.0, -1.0):
+        KaguraCloudClient(_Sdk()).feedback("ctx", "m1", weight=weight)
+        assert seen["helpful"] is False, f"weight={weight} should map to helpful=False"
 
 
 # --- Plan 5+: recall filters + pin/unpin on the cloud client ----------------
