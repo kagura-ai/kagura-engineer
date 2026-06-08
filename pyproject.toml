@@ -44,7 +44,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-cov>=5.0"]
+dev = ["pytest>=8.0", "pytest-cov>=6.0"]
 # The `review` command shells out to the kagura-code-reviewer console script.
 # It is the one runtime dependency that lives on PyPI (claude/gh/ollama do not),
 # so it is offered as an opt-in extra. Without it, `review` degrades to a clean
