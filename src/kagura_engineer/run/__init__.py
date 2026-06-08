@@ -69,7 +69,13 @@ ProgressSink = Callable[[str], None]
 # logged-in (OAuth) session. We do NOT silently scrub the key (that would break
 # legitimate API-key auth, e.g. CI); instead we detect the signature and hand the
 # operator the exact, safe remedy.
-_AUTH_FAIL_RE = re.compile(r"invalid api key|fix external api key", re.IGNORECASE)
+# Match claude's FULL auth-failure signature ("Invalid API key · Fix external API
+# key") — both phrases, in order — not the standalone "invalid api key", which can
+# appear in unrelated model output (e.g. a doc discussing API-key handling) and
+# would wrongly blame ANTHROPIC_API_KEY. DOTALL so the separator can be anything.
+_AUTH_FAIL_RE = re.compile(
+    r"invalid api key.*?fix external api key", re.IGNORECASE | re.DOTALL
+)
 
 
 def _auth_failure_hint(stdout: str, stderr: str, issue: int) -> str | None:

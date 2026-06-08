@@ -160,7 +160,11 @@ def run(
         help="dial HITL down: delegated phases proceed on green/yellow without "
              "asking (red/unknown still halt)",
     ),
-    json_out: bool = typer.Option(False, "--json"),
+    json_out: bool = typer.Option(
+        False, "--json",
+        help="emit the run report as JSON; phase progress streaming is "
+             "suppressed so stdout stays a single valid JSON document",
+    ),
 ) -> None:
     """Drive a GitHub issue to a PR via the memory-grounded agent loop.
 
@@ -252,7 +256,11 @@ def goal(
         help="dial HITL down across issues: proceed on green/yellow without "
              "asking (red/unknown still halt)",
     ),
-    json_out: bool = typer.Option(False, "--json"),
+    json_out: bool = typer.Option(
+        False, "--json",
+        help="emit the milestone report as JSON; per-issue phase progress "
+             "streaming is suppressed so stdout stays a single valid JSON document",
+    ),
 ) -> None:
     """Drive every open issue in a milestone to a PR via the run loop.
 

@@ -137,6 +137,22 @@ def test_phase_fail_auth_hint_only_on_auth_signature(monkeypatch):
     assert "ANTHROPIC_API_KEY" not in (report.resume_hint or "")
 
 
+def test_phase_fail_generic_api_key_text_does_not_trigger_auth_hint(monkeypatch):
+    # A standalone "invalid api key" mention (e.g. unrelated model output about
+    # API-key handling) must NOT trip the auth hint — only claude's full signature
+    # ("Invalid API key · Fix external API key") should. The error is still
+    # surfaced; just no ANTHROPIC_API_KEY remedy is attached.
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation(
+            "start", 1, "note: the tool returned an invalid api key error", "",
+            None, None),
+    })
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.FAIL
+    assert "invalid api key" in report.phases[-1].detail.lower()  # still surfaced
+    assert "ANTHROPIC_API_KEY" not in (report.resume_hint or "")  # no false hint
+
+
 def test_no_remember_skips_persist(monkeypatch):
     _patch_boundaries(monkeypatch, phases={
         "start": PhaseInvocation("start", 0, "", "", "green", None),
