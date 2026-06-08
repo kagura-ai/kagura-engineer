@@ -27,6 +27,53 @@ def test_parse_verdict_returns_none_when_absent():
     assert workflow.parse_verdict("no marker here") is None
 
 
+# --- native `## Verdict:` fallback (issue #2) ---------------------------------
+# The delegated gh-issue-driven / c-suite skills close with a native
+# `## Verdict: <green|yellow|red>` line — a shared, structured verdict token
+# (emitted by c-suite, parsed by gh-issue-driven). When the model completes the
+# skill but drops the harness's KAGURA_VERDICT= marker, fall back to that line
+# rather than halting a healthy run. This is a *blessed secondary contract*, not
+# a free-form scrape; the KAGURA_VERDICT= marker stays primary.
+
+
+def test_parse_verdict_falls_back_to_native_line_when_marker_absent():
+    text = "design review...\n\n## Verdict: green\n"
+    assert workflow.parse_verdict(text) == "green"
+
+
+def test_parse_verdict_marker_wins_over_native_line():
+    # Both present → the explicit marker is authoritative even if a native
+    # line disagrees and appears later in the text.
+    text = "KAGURA_VERDICT=red\nblah\n## Verdict: green\n"
+    assert workflow.parse_verdict(text) == "red"
+
+
+def test_parse_verdict_native_line_is_case_insensitive():
+    assert workflow.parse_verdict("## VERDICT: Yellow") == "yellow"
+
+
+def test_parse_verdict_native_line_last_wins():
+    # Escalation can emit several verdict lines; the final one is the decision.
+    text = "## Verdict: red\nreconsidered\n## Verdict: green\n"
+    assert workflow.parse_verdict(text) == "green"
+
+
+def test_parse_verdict_native_decline_token_is_ignored():
+    # `decline` is a c-suite routing token, not a phase verdict — the native
+    # fallback only recognises green|yellow|red, so a decline-only body halts.
+    assert workflow.parse_verdict("## Verdict: decline") is None
+
+
+def test_parse_verdict_native_tolerates_trailing_punctuation():
+    assert workflow.parse_verdict("## Verdict: green.") == "green"
+
+
+def test_parse_verdict_native_tolerates_leading_whitespace():
+    # Parity with gh-issue-driven's canonical `^\s*##\s*Verdict:` regex — an
+    # indented/quoted verdict line (list item, blockquote) must still match.
+    assert workflow.parse_verdict("  ## Verdict: green") == "green"
+
+
 def test_parse_pr_url_reads_marker():
     assert workflow.parse_pr_url("KAGURA_PR_URL=https://github.com/o/r/pull/5\n") == "https://github.com/o/r/pull/5"
 

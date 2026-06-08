@@ -11,6 +11,21 @@ at the very end:
 parses those markers. A missing verdict marker parses to None, which the
 gate treats as a halt (safe default).
 
+Native-verdict fallback (issue #2). In practice the model sometimes runs the
+delegated skill to completion but drops the trailing `KAGURA_VERDICT=` marker,
+because the skill closes with its own `## Verdict: <green|yellow|red>` line and
+the model treats that as "done". To avoid halting an otherwise-green run on a
+pure marker-emission miss, `parse_verdict` falls back to that native line when
+the marker is absent. This is NOT a return to free-form output scraping: the
+`## Verdict:` line is a *blessed, structured secondary contract* — the same
+token the c-suite reviewer skills emit and gh-issue-driven itself parses, so we
+read a shared verdict token, not arbitrary prose. The `KAGURA_VERDICT=` marker
+stays primary; the native line is consulted only on its absence; if neither is
+present the result is still None → halt. The fallback recognises green|yellow|
+red only — ship/gate2's `pass|fail` vocabulary is intentionally out of scope
+here (tracked separately) so this change rescues the `start`/gate1 path without
+silently reinterpreting gate2 verdicts.
+
 Phases are separate `claude -p` calls because gh-issue-driven checkpoints
 to the branch + memory between phases, so each call resumes cleanly.
 """
@@ -27,6 +42,16 @@ _PHASE_TIMEOUT_S = 1800  # 30 min per phase
 
 _VERDICT_RE = re.compile(r"^KAGURA_VERDICT=(\w+)\s*$", re.MULTILINE)
 _PR_RE = re.compile(r"^KAGURA_PR_URL=(\S+)\s*$", re.MULTILINE)
+# Blessed secondary contract: the native `## Verdict:` line emitted by the
+# c-suite / gh-issue-driven skills. Consulted only when the KAGURA_VERDICT=
+# marker is absent (see module docstring). green|yellow|red only — `decline`
+# and gate2's `pass|fail` are deliberately excluded.
+# The leading `\s*` mirrors gh-issue-driven's canonical verdict regex
+# (`^\s*##\s*Verdict:\s*(green|yellow|red)\b`) so an indented/quoted line is not
+# missed — parity with the contract this fallback claims to share.
+_NATIVE_VERDICT_RE = re.compile(
+    r"^\s*##\s*Verdict:\s*(green|yellow|red)\b", re.MULTILINE | re.IGNORECASE
+)
 
 
 @dataclass(frozen=True)
@@ -76,7 +101,11 @@ def build_prompt(
 
 def parse_verdict(text: str) -> str | None:
     matches = _VERDICT_RE.findall(text or "")
-    return matches[-1].lower() if matches else None
+    if matches:
+        return matches[-1].lower()
+    # Marker absent → fall back to the native `## Verdict:` line (issue #2).
+    native = _NATIVE_VERDICT_RE.findall(text or "")
+    return native[-1].lower() if native else None
 
 
 def parse_pr_url(text: str) -> str | None:
