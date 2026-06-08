@@ -240,3 +240,38 @@ def test_drain_whitespace_only_wal_is_zero(tmp_path):
     wal_path.write_text("\n\n   \n", encoding="utf-8")
     c = FailoverMemoryClient(_FakeInner(), wal_path)
     assert c.drain() == 0
+
+
+def _cfg(**over):
+    from kagura_engineer.config import Config
+    base = dict(profile="coding", memory_cloud_url="https://m",
+                workspace_id="w", context_id="c")
+    base.update(over)
+    return Config(**base)
+
+
+def test_resolve_wraps_cloud_when_failover_on(tmp_path, monkeypatch):
+    from kagura_engineer.run import memory as mem_mod
+    # Avoid importing the real SDK: stub the cloud client constructor.
+    monkeypatch.setattr(mem_mod.KaguraCloudClient, "from_config",
+                        classmethod(lambda cls, cfg: _FakeInner()))
+    client = mem_mod.resolve_memory_client(_cfg(memory_failover=True))
+    assert isinstance(client, FailoverMemoryClient)
+
+
+def test_resolve_bare_cloud_when_failover_off(tmp_path, monkeypatch):
+    from kagura_engineer.run import memory as mem_mod
+    fake = _FakeInner()
+    monkeypatch.setattr(mem_mod.KaguraCloudClient, "from_config",
+                        classmethod(lambda cls, cfg: fake))
+    client = mem_mod.resolve_memory_client(_cfg(memory_failover=False))
+    assert client is fake                                # not wrapped
+
+
+def test_resolve_local_unchanged(tmp_path):
+    from kagura_engineer.run import memory as mem_mod
+    from kagura_engineer.run.local_memory import LocalMemoryClient
+    cfg = _cfg(memory_backend="local", local_memory_path=str(tmp_path / "m.db"),
+               memory_cloud_url="", workspace_id="", context_id="")
+    client = mem_mod.resolve_memory_client(cfg)
+    assert isinstance(client, LocalMemoryClient)
