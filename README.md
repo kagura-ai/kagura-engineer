@@ -249,10 +249,19 @@ gate halted — resolve it, then re-run).
 ### Headless auth (`run` / `review --fix` / `goal`)
 
 These commands spawn headless `claude -p` subprocesses, which need a **valid
-Anthropic credential** in the environment — either a real `ANTHROPIC_API_KEY` or
-a `claude login` (claude.ai) session. `doctor`'s `claude-code` check only
-verifies the binary launches, not that auth works, so a bad credential surfaces
-as a phase that can't produce a verdict.
+Anthropic credential** in the environment. Two options, in recommended order:
+
+1. **A Claude Pro/Max subscription (recommended)** — run `claude` once to
+   `claude login`. `run`/`goal` fan out *many* `claude -p` phases per issue, so a
+   flat-rate subscription is dramatically cheaper than metered API billing for an
+   autonomous loop. Caveat: heavy runs can hit subscription rate limits — if you
+   drive a whole milestone unattended (CI/cron), use an API key instead.
+2. **`ANTHROPIC_API_KEY`** — a metered API key. Best for unattended CI where no
+   interactive `claude login` seat exists. Must be a real value (an empty string
+   is treated as unset).
+
+`doctor`'s `claude-code` check only verifies the binary launches, not that auth
+works, so a bad credential surfaces as a phase that can't produce a verdict.
 
 > **Nested-in-Claude-Code gotcha:** if you run kagura-engineer from *inside* a
 > Claude Code session, the inherited `ANTHROPIC_API_KEY` is that session's

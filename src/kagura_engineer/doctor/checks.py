@@ -71,7 +71,8 @@ def check_claude_code() -> CheckResult:
             "claude-code",
             Status.FAIL,
             f"v{version}, ANTHROPIC_API_KEY is set to empty string",
-            "unset or set a real value (e.g. `export ANTHROPIC_API_KEY=sk-ant-...`)",
+            "unset it to fall back to your `claude login` subscription "
+            "(recommended), or set a real value (`export ANTHROPIC_API_KEY=sk-ant-...`)",
         )
     if key:
         return CheckResult("claude-code", Status.OK, f"v{version}, auth=api_key")
