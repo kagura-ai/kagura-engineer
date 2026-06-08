@@ -31,7 +31,8 @@ class _FakeMemory:
     def feedback(self, context_id, memory_id, *, weight=1.0):
         self.feedback_calls.append(memory_id)
     def remember(self, context_id, *, summary, content, type, tags=None):
-        self.remembered.append((type, summary)); return "mem-1"
+        self.remembered.append((type, summary))
+        return "mem-1"
     def get_state(self, context_id, key): return self.state.get(key)
     def set_state(self, context_id, key, value): self.state[key] = value
 
@@ -44,7 +45,9 @@ def _patch_boundaries(monkeypatch, *, blocking=False, phases=None):
     phases = phases or {}
 
     def _invoke(phase, issue, worktree, grounding, **kw):
-        return phases[phase]
+        # Unspecified phases default to green so a test only declares the phases
+        # it cares about (e.g. a start-red test need not spell out implement/ship).
+        return phases.get(phase) or PhaseInvocation(phase, 0, "", "", "green", None)
 
     monkeypatch.setattr("kagura_engineer.run.invoke_phase", _invoke)
 
@@ -74,7 +77,7 @@ def test_happy_path_reaches_pr_and_persists(monkeypatch):
     report = run_idea(_cfg(), 42, memory=mem, repo_root=Path("/repo"))
     assert report.status is RunStatus.OK
     assert report.pr_url == "https://x/pull/9"
-    assert [p.name for p in report.phases] == ["guard", "recall", "worktree", "start", "ship", "persist"]
+    assert [p.name for p in report.phases] == ["guard", "recall", "worktree", "start", "implement", "ship", "persist"]
     assert any(t == "savepoint" for t, _ in mem.remembered)
     assert mem.state.get("run:42") is not None  # resume marker set to done
 
@@ -191,7 +194,7 @@ def test_unattended_threads_to_invoke_phase(monkeypatch):
     monkeypatch.setattr("kagura_engineer.run.invoke_phase", _invoke)
     report = run_idea(_cfg(), 7, unattended=True, memory=_FakeMemory(), repo_root=Path("/repo"))
     assert report.status is RunStatus.OK
-    assert seen == [True, True]  # start + ship both threaded
+    assert seen == [True, True, True]  # start + implement + ship all threaded
 
 
 def test_mcp_config_threads_to_invoke_phase(monkeypatch):
@@ -209,7 +212,7 @@ def test_mcp_config_threads_to_invoke_phase(monkeypatch):
     cfg = _cfg().model_copy(update={"memory_mcp_config": "/tmp/m.json"})
     report = run_idea(cfg, 7, memory=_FakeMemory(), repo_root=Path("/repo"))
     assert report.status is RunStatus.OK
-    assert seen == ["/tmp/m.json", "/tmp/m.json"]
+    assert seen == ["/tmp/m.json", "/tmp/m.json", "/tmp/m.json"]
 
 
 def test_resume_skips_already_shipped_issue(monkeypatch):
@@ -307,3 +310,63 @@ def test_explore_failure_does_not_fail_recall(monkeypatch):
     assert report.status is RunStatus.OK  # explore failure is non-fatal
     recall_phase = next(p for p in report.phases if p.name == "recall")
     assert recall_phase.status is RunStatus.OK
+
+
+# --- issue #9: dedicated implement phase between start and ship ------------
+
+
+def test_phase_sequence_includes_implement(monkeypatch):
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "implement": PhaseInvocation("implement", 0, "", "", "green", None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+    # head moves between start and ship → a commit was produced.
+    shas = iter(["before", "after"])
+    monkeypatch.setattr("kagura_engineer.run.head_rev", lambda wt: next(shas))
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK
+    assert [p.name for p in report.phases] == \
+        ["guard", "recall", "worktree", "start", "implement", "ship", "persist"]
+
+
+def test_implement_no_commit_is_fail(monkeypatch):
+    # implement ran green but produced NO commit → ship has nothing; fail clearly
+    # at implement instead of the confusing "ship red" (issue #9).
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "implement": PhaseInvocation("implement", 0, "", "", "green", None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+    monkeypatch.setattr("kagura_engineer.run.head_rev", lambda wt: "unchanged-sha")
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.FAIL
+    assert report.phases[-1].name == "implement"
+    assert "no commit" in report.phases[-1].detail.lower()
+    assert "ship" not in [p.name for p in report.phases]  # ship never ran
+
+
+def test_implement_with_commit_proceeds_to_ship(monkeypatch):
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "implement": PhaseInvocation("implement", 0, "", "", "green", None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+    shas = iter(["before", "after"])  # HEAD changed → commit produced
+    monkeypatch.setattr("kagura_engineer.run.head_rev", lambda wt: next(shas))
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK
+    assert report.pr_url == "https://x/pull/9"
+
+
+def test_implement_head_rev_unreadable_skips_check(monkeypatch):
+    # If HEAD can't be read (head_rev → None), degrade to "skip the check" rather
+    # than false-failing — best-effort, matching the per-phase isolation invariant.
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "implement": PhaseInvocation("implement", 0, "", "", "green", None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+    monkeypatch.setattr("kagura_engineer.run.head_rev", lambda wt: None)
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK  # check skipped, ship proceeds

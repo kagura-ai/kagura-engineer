@@ -119,16 +119,61 @@ def build_prompt(
         if mcp_enabled
         else ""
     )
+    if phase == "implement":
+        # No `/gh-issue-driven:implement` skill exists — the implement phase
+        # drives implementation directly. Design is already gate1-approved, so
+        # build (don't re-litigate): test-first discipline, scope-picked
+        # orchestration, and a COMMIT (an empty/uncommitted implementation has
+        # nothing for ship to package — issue #9).
+        body = (
+            f"Implement GitHub issue #{issue} on the current branch. The design "
+            "has already been reviewed and approved (gate1) — do not re-open it, "
+            "build it. Drive the work TEST-FIRST (test-driven-development): write "
+            "the failing test, watch it fail, write the minimal code to pass, then "
+            "refactor while green. Pick the orchestration that fits the change's "
+            "size — direct edits for a small change, `/feature-dev:feature-dev` "
+            "for a moderate feature, `/superpowers:subagent-driven-development` "
+            "for large plan-driven work — and apply the test-first discipline "
+            "inside it. Run the test suite until green, then COMMIT to the branch "
+            "(an uncommitted or empty implementation cannot be shipped).\n"
+        )
+        verdict_hint = (
+            "KAGURA_VERDICT=<green|yellow|red>   "
+            "(green = implemented, tests green, committed)\n"
+        )
+    else:
+        body = f"Run the slash command `/gh-issue-driven:{phase} {issue}` to completion.\n"
+        verdict_hint = "KAGURA_VERDICT=<green|yellow|red>   (the phase gate verdict)\n"
     return (
         "You are running inside an automated kagura-engineer run.\n"
         "Relevant memory (recall + pinned guardrails):\n"
         f"{context}\n\n"
-        f"Run the slash command `/gh-issue-driven:{phase} {issue}` to completion.\n"
+        f"{body}"
         f"{mode}{mcp}"
         "When finished, print these two lines LAST, exactly:\n"
-        "KAGURA_VERDICT=<green|yellow|red>   (the phase gate verdict)\n"
+        f"{verdict_hint}"
         "KAGURA_PR_URL=<pull-request-url or - if none>\n"
     )
+
+
+def head_rev(worktree: Path) -> str | None:
+    """The worktree's current HEAD commit sha, or None if it can't be read.
+
+    Used to detect whether the implement phase actually produced a commit
+    (issue #9): if HEAD is unchanged across the phase, no code was committed and
+    there is nothing for ship to package. Best-effort — any git failure returns
+    None so the caller degrades to "skip the check" rather than crashing.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(worktree), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
 
 
 def parse_verdict(text: str, phase: str | None = None) -> str | None:
