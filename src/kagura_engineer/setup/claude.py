@@ -133,8 +133,9 @@ def ensure_claude_login(*, no_input: bool, dry_run: bool) -> StepResult:
                 StepStatus.FAIL,
                 f"{prefix}no auth source and --no-input refuses to prompt",
                 fix_hint=(
-                    "either export ANTHROPIC_API_KEY=... or drop --no-input "
-                    "and run `claude` once interactively to bootstrap a subscription login"
+                    "drop --no-input and run `claude` once interactively to set up a "
+                    "subscription login (recommended for autonomous loops), "
+                    "or export ANTHROPIC_API_KEY=... for unattended CI"
                 ),
                 duration_s=time.monotonic() - started,
             )
