@@ -8,15 +8,28 @@ While the project is in `0.x`, minor versions may carry breaking changes.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-06-09
+
 ### Added
 
 - `init` command (#35): scaffolds a commented `repo.yaml` template (never
   overwrites an existing one) and idempotently adds `repo.yaml` to `.gitignore`,
   so a fresh checkout starts configured and the workspace/context IDs stay out
   of git by default. `kagura-engineer init [--dir <path>]`.
+- `setup` now generates `<repo>/.mcp.json` via the Kagura Memory SDK 0.30
+  (secretless stdio / OAuth-profile form, or `url`+`Bearer` for `KAGURA_API_KEY`),
+  so a child `claude -p` can use Memory Cloud in-task without a hand-authored
+  config. (#36)
+- `config` rejects unknown `repo.yaml` keys via `extra="forbid"` on the Config
+  model — a typo'd key now fails loudly instead of being silently ignored. (#46)
 
 ### Changed
 
+- Migrated the shared headless `claude -p` launcher dependency from
+  `kagura-claude-harness` to its renamed, restructured successor `kagura-brain`
+  (engineer uses the `claude` adapter; runtime behavior unchanged). (#48)
+- Adopted the shared harness as the single `claude -p` launcher seam, removing
+  kagura-engineer's own argv construction (the unhardened #34 twin). (#40)
 - `setup` (memory-mcp step) now adds the generated secret files (`.mcp.json`
   and, under `--full`, `.kagura.json`) to `.gitignore` **before** writing them —
   both bake in a bearer key / api_key, so the ignore rules are established first
@@ -25,6 +38,11 @@ While the project is in `0.x`, minor versions may carry breaking changes.
   logic (#35).
 - `config`: a missing `repo.yaml` now points the user at `kagura-engineer init`
   instead of only reporting the absence (#35).
+
+### Fixed
+
+- `run`: persist the child's stdout on the silent "green ship, no PR" FAIL path
+  so the failure is diagnosable instead of vanishing. (#38)
 
 ## [0.2.1] — 2026-06-09
 
