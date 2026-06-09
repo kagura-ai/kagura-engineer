@@ -171,6 +171,27 @@ def test_successful_write_gitignores_mcp_json(tmp_path):
     assert ".mcp.json" in gi.read_text().splitlines()
 
 
+def test_full_run_gitignores_kagura_json_too(tmp_path, monkeypatch):
+    # code-review #1: under --full + static-token the SDK also writes .kagura.json
+    # holding the api_key. The fail-secure block must gitignore BOTH secret files
+    # (mirroring the SDK's own _check_gitignore secret_files list), not just
+    # .mcp.json — else the bearer key in .kagura.json lands un-ignored.
+    def _fake_run_setup_claude(api_key, mcp_url, context_id, project_dir, non_interactive, **kw):
+        (tmp_path / ".mcp.json").write_text("{}")
+        (tmp_path / ".kagura.json").write_text('{"api_key": "kg-secret"}')
+
+    monkeypatch.setattr(memory_mcp, "run_setup_claude", _fake_run_setup_claude)
+    cfg = _cloud_cfg()
+    r = ensure_memory_mcp_config(
+        cfg, no_input=False, dry_run=False, full=True, repo_dir=tmp_path,
+        env={"KAGURA_API_KEY": "kg-secret"}, home=tmp_path,
+    )
+    assert r.status is StepStatus.OK
+    gi = (tmp_path / ".gitignore").read_text().splitlines()
+    assert ".mcp.json" in gi
+    assert ".kagura.json" in gi  # the api_key-bearing sibling must be ignored too
+
+
 def test_gitignore_failure_blocks_secret_write_fail_secure(tmp_path):
     # gate2 (cso): fail-secure ordering. If .mcp.json cannot be git-ignored, the
     # step must NOT write the bearer-token-bearing file — better no .mcp.json than

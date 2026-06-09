@@ -17,11 +17,12 @@ While the project is in `0.x`, minor versions may carry breaking changes.
 
 ### Changed
 
-- `setup` (memory-mcp step) now adds the generated `.mcp.json` to `.gitignore`
-  **before** writing it — its static-token form bakes in a bearer key, so the
-  ignore rule is established first (fail-secure: a write failure can never leave
-  an un-ignored secret on disk). Reuses the new `init` scaffold helper rather
-  than duplicating the gitignore logic (#35).
+- `setup` (memory-mcp step) now adds the generated secret files (`.mcp.json`
+  and, under `--full`, `.kagura.json`) to `.gitignore` **before** writing them —
+  both bake in a bearer key / api_key, so the ignore rules are established first
+  (fail-secure: a write failure can never leave an un-ignored secret on disk).
+  Reuses the new `init` scaffold helper rather than duplicating the gitignore
+  logic (#35).
 - `config`: a missing `repo.yaml` now points the user at `kagura-engineer init`
   instead of only reporting the absence (#35).
 

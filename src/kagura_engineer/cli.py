@@ -105,7 +105,11 @@ def init(
     Idempotent and never overwrites an existing repo.yaml — safe to re-run. Run
     this first in a new checkout, then edit repo.yaml and run `setup`.
     """
-    result = scaffold(Path(directory))
+    root = Path(directory)
+    if not root.is_dir():
+        typer.echo(f"init: directory does not exist: {root}", err=True)
+        raise typer.Exit(code=2)
+    result = scaffold(root)
     if result.repo_yaml_created:
         typer.echo(f"created {result.repo_yaml_path}")
     else:

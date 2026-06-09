@@ -550,6 +550,15 @@ def test_init_listed_in_help():
     assert "init" in result.stdout
 
 
+def test_init_nonexistent_dir_clean_error(tmp_path):
+    # code-review #3: init --dir to a missing directory must give a clean error
+    # (exit 2), not a raw FileNotFoundError traceback.
+    missing = tmp_path / "nope"
+    result = runner.invoke(app, ["init", "--dir", str(missing)])
+    assert result.exit_code == 2
+    assert not (missing / "repo.yaml").exists()
+
+
 def test_init_scaffolds_repo_yaml_and_gitignore(tmp_path):
     result = runner.invoke(app, ["init", "--dir", str(tmp_path)])
     assert result.exit_code == 0
