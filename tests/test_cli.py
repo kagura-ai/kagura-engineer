@@ -539,3 +539,36 @@ def test_goal_unattended_flag_threads(monkeypatch, tmp_path):
     r = runner.invoke(app, ["goal", "v0.3", "-c", str(cfg), "--unattended"])
     assert r.exit_code == 0
     assert seen.get("unattended") is True
+
+
+# --- init: scaffold repo.yaml + .gitignore (issue #35) ------------------------
+
+
+def test_init_listed_in_help():
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    assert "init" in result.stdout
+
+
+def test_init_nonexistent_dir_clean_error(tmp_path):
+    # code-review #3: init --dir to a missing directory must give a clean error
+    # (exit 2), not a raw FileNotFoundError traceback.
+    missing = tmp_path / "nope"
+    result = runner.invoke(app, ["init", "--dir", str(missing)])
+    assert result.exit_code == 2
+    assert not (missing / "repo.yaml").exists()
+
+
+def test_init_scaffolds_repo_yaml_and_gitignore(tmp_path):
+    result = runner.invoke(app, ["init", "--dir", str(tmp_path)])
+    assert result.exit_code == 0
+    assert (tmp_path / "repo.yaml").is_file()
+    assert "repo.yaml" in (tmp_path / ".gitignore").read_text()
+
+
+def test_init_is_idempotent_and_never_overwrites(tmp_path):
+    (tmp_path / "repo.yaml").write_text("profile: mine\nmemory_backend: local\n")
+    result = runner.invoke(app, ["init", "--dir", str(tmp_path)])
+    assert result.exit_code == 0
+    # existing repo.yaml is preserved verbatim
+    assert (tmp_path / "repo.yaml").read_text() == "profile: mine\nmemory_backend: local\n"

@@ -30,9 +30,9 @@ MARKETPLACE_JSON = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 SKILLS_DIR = REPO_ROOT / "skills"
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 
-# Every CLI verb that gets a skill wrapper. doctor/setup are setup helpers;
-# run/review/goal are the harness flows.
-EXPECTED_SKILLS = ["doctor", "setup", "run", "review", "goal"]
+# Every CLI verb that gets a skill wrapper. init/doctor/setup are setup helpers
+# (init scaffolds repo.yaml); run/review/goal are the harness flows.
+EXPECTED_SKILLS = ["init", "doctor", "setup", "run", "review", "goal"]
 HARNESS_SKILLS = ["run", "review", "goal"]
 
 _FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n", re.DOTALL)
@@ -141,8 +141,11 @@ def test_skill_is_thin_wrapper(verb):
 @pytest.mark.parametrize("verb", EXPECTED_SKILLS)
 def test_skill_runs_doctor_precondition(verb):
     _, text = _frontmatter(SKILLS_DIR / verb / "SKILL.md")
-    # the doctor skill IS the precondition; the rest must run it first
-    if verb == "doctor":
+    # the doctor skill IS the precondition; the rest must run it first. init is
+    # the pre-doctor bootstrap (it scaffolds repo.yaml on a fresh checkout that
+    # may have nothing set up yet) — doctor is a downstream verify, not its
+    # precondition, so it is exempt alongside doctor.
+    if verb in ("doctor", "init"):
         return
     assert "kagura-engineer doctor" in text, f"{verb}: must run doctor as a precondition"
 

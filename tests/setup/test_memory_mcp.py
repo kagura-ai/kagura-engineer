@@ -153,3 +153,80 @@ def test_full_installs_via_run_setup_claude(tmp_path, monkeypatch):
     assert calls["profile"] == "work"
     assert calls["non_interactive"] is True
     assert calls["context_id"] == "ctx"
+
+
+# --- the generated .mcp.json (static-token form holds a key) is gitignored,
+#     reusing the issue #35 helper rather than duplicating gitignore logic ------
+
+
+def test_successful_write_gitignores_mcp_json(tmp_path):
+    cfg = _cloud_cfg()
+    r = ensure_memory_mcp_config(
+        cfg, no_input=False, dry_run=False, repo_dir=tmp_path,
+        env={"KAGURA_API_KEY": "kg-secret"}, home=tmp_path,
+    )
+    assert r.status is StepStatus.OK
+    gi = tmp_path / ".gitignore"
+    assert gi.is_file()
+    assert ".mcp.json" in gi.read_text().splitlines()
+
+
+def test_full_run_gitignores_kagura_json_too(tmp_path, monkeypatch):
+    # code-review #1: under --full + static-token the SDK also writes .kagura.json
+    # holding the api_key. The fail-secure block must gitignore BOTH secret files
+    # (mirroring the SDK's own _check_gitignore secret_files list), not just
+    # .mcp.json — else the bearer key in .kagura.json lands un-ignored.
+    def _fake_run_setup_claude(api_key, mcp_url, context_id, project_dir, non_interactive, **kw):
+        (tmp_path / ".mcp.json").write_text("{}")
+        (tmp_path / ".kagura.json").write_text('{"api_key": "kg-secret"}')
+
+    monkeypatch.setattr(memory_mcp, "run_setup_claude", _fake_run_setup_claude)
+    cfg = _cloud_cfg()
+    r = ensure_memory_mcp_config(
+        cfg, no_input=False, dry_run=False, full=True, repo_dir=tmp_path,
+        env={"KAGURA_API_KEY": "kg-secret"}, home=tmp_path,
+    )
+    assert r.status is StepStatus.OK
+    gi = (tmp_path / ".gitignore").read_text().splitlines()
+    assert ".mcp.json" in gi
+    assert ".kagura.json" in gi  # the api_key-bearing sibling must be ignored too
+
+
+def test_gitignore_failure_blocks_secret_write_fail_secure(tmp_path):
+    # gate2 (cso): fail-secure ordering. If .mcp.json cannot be git-ignored, the
+    # step must NOT write the bearer-token-bearing file — better no .mcp.json than
+    # an un-ignored secret on disk. Make .gitignore unwritable by making it a dir.
+    (tmp_path / ".gitignore").mkdir()
+    cfg = _cloud_cfg()
+    r = ensure_memory_mcp_config(
+        cfg, no_input=False, dry_run=False, repo_dir=tmp_path,
+        env={"KAGURA_API_KEY": "kg-secret"}, home=tmp_path,
+    )
+    assert r.status is StepStatus.FAIL
+    assert not (tmp_path / ".mcp.json").exists()  # no un-ignored secret written
+
+
+def test_skip_path_does_not_touch_gitignore(tmp_path):
+    # The gitignore side-effect must never fire when no .mcp.json was written.
+    cfg = _cloud_cfg(memory_backend="local")
+    ensure_memory_mcp_config(
+        cfg, no_input=False, dry_run=False, repo_dir=tmp_path, env={}, home=tmp_path
+    )
+    assert not (tmp_path / ".gitignore").exists()
+
+
+def test_needs_user_path_does_not_touch_gitignore(tmp_path):
+    cfg = _cloud_cfg()  # cloud backend, but no credential resolves
+    ensure_memory_mcp_config(
+        cfg, no_input=False, dry_run=False, repo_dir=tmp_path, env={}, home=tmp_path
+    )
+    assert not (tmp_path / ".gitignore").exists()
+
+
+def test_dry_run_does_not_touch_gitignore(tmp_path):
+    _write_login(tmp_path)
+    cfg = _cloud_cfg()
+    ensure_memory_mcp_config(
+        cfg, no_input=False, dry_run=True, repo_dir=tmp_path, env={}, home=tmp_path
+    )
+    assert not (tmp_path / ".gitignore").exists()

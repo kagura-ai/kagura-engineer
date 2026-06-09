@@ -87,7 +87,11 @@ class Config(BaseModel):
 def load_config(path: str | Path) -> Config:
     p = Path(path)
     if not p.is_file():
-        raise ConfigError(f"config not found: {p}")
+        # A missing repo.yaml is the fresh-checkout case — point the user at the
+        # scaffold path (issue #35) instead of just reporting the absence.
+        raise ConfigError(
+            f"config not found: {p} — run `kagura-engineer init` to scaffold a repo.yaml"
+        )
     try:
         text = p.read_text()
     except OSError as exc:
