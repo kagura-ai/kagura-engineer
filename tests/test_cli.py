@@ -1,6 +1,9 @@
+import pytest
+import yaml
 from typer.testing import CliRunner
 
-from kagura_engineer.cli import app
+from kagura_engineer.cli import app, _written_backend_needs_creds
+from kagura_engineer.config import CLOUD_REQUIRED_FIELDS
 from kagura_engineer.doctor.result import CheckResult, Status
 from kagura_engineer.review.envelope import ReviewEnvelope
 from kagura_engineer.review.reviewer import ReviewerResult
@@ -572,3 +575,62 @@ def test_init_is_idempotent_and_never_overwrites(tmp_path):
     assert result.exit_code == 0
     # existing repo.yaml is preserved verbatim
     assert (tmp_path / "repo.yaml").read_text() == "profile: mine\nmemory_backend: local\n"
+
+
+def test_init_prints_cloud_creds_affordance_on_fresh_scaffold(tmp_path):
+    # issue #43 item 2: the shipped template uses memory_backend: cloud with
+    # empty creds, so it fails validation unedited. init must tell the user the
+    # file won't validate until they fill the cloud credentials, instead of a
+    # generic "edit then run setup" that hides the next required step.
+    result = runner.invoke(app, ["init", "--dir", str(tmp_path)])
+    assert result.exit_code == 0
+    out = result.stdout.lower()
+    assert "credential" in out
+    assert "validate" in out
+    # The hint names the cloud fields from the shared SSOT, not hand-typed prose,
+    # so a future required field is listed automatically (issue #43, /code-review).
+    for field in CLOUD_REQUIRED_FIELDS:
+        assert field in result.stdout
+
+
+def test_init_no_cloud_affordance_when_repo_yaml_exists(tmp_path):
+    # When repo.yaml already exists, init left it unchanged — it must not claim
+    # the file "won't validate" (the existing file may be a finished config).
+    (tmp_path / "repo.yaml").write_text("profile: mine\nmemory_backend: local\n")
+    result = runner.invoke(app, ["init", "--dir", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "won't validate" not in result.stdout.lower()
+
+
+def _cloud_yaml(tmp_path, **overrides):
+    data = {
+        "profile": "dev",
+        "memory_backend": "cloud",
+        "memory_cloud_url": "https://m",
+        "workspace_id": "w",
+        "context_id": "c",
+    }
+    data.update(overrides)
+    p = tmp_path / "repo.yaml"
+    p.write_text(yaml.safe_dump(data))
+    return p
+
+
+@pytest.mark.parametrize("blank", CLOUD_REQUIRED_FIELDS)
+def test_written_backend_needs_creds_true_when_any_cloud_field_blank(tmp_path, blank):
+    # issue #43: the affordance helper iterates the shared CLOUD_REQUIRED_FIELDS
+    # constant (not a local hardcoded tuple), so a missing field in any of them
+    # triggers the hint — and a future field added to the constant is covered.
+    p = _cloud_yaml(tmp_path, **{blank: ""})
+    assert _written_backend_needs_creds(p) is True
+
+
+def test_written_backend_needs_creds_false_when_all_cloud_fields_filled(tmp_path):
+    p = _cloud_yaml(tmp_path)
+    assert _written_backend_needs_creds(p) is False
+
+
+def test_written_backend_needs_creds_false_for_local_backend(tmp_path):
+    p = tmp_path / "repo.yaml"
+    p.write_text("profile: dev\nmemory_backend: local\n")
+    assert _written_backend_needs_creds(p) is False

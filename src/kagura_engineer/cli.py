@@ -3,9 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import typer
+import yaml
 
 from . import __version__
-from .config import ConfigError, load_config
+from .config import CLOUD_REQUIRED_FIELDS, ConfigError, load_config
 from .doctor.registry import overall_status, run_all
 from .doctor.render import print_table, to_json
 from .doctor.result import Status
@@ -94,6 +95,28 @@ def _check_fix_name(only: str | None, plan: list[str]) -> str | None:
     return None
 
 
+def _written_backend_needs_creds(repo_yaml_path: Path) -> bool:
+    """True when the freshly-scaffolded repo.yaml won't validate without creds.
+
+    The shipped template defaults to ``memory_backend: cloud`` with blank cloud
+    fields, which fails ``Config`` validation until filled (issue #43 item 2).
+    Read the file we just wrote and report whether it is a cloud backend missing
+    any of its required credentials, so the ``init`` next-step hint is accurate
+    and survives a future change to the template's default backend. Any parse
+    error degrades to ``False`` (fall back to the plain hint) — this is a UX
+    affordance, never a hard gate.
+    """
+    try:
+        data = yaml.safe_load(repo_yaml_path.read_text()) or {}
+    except (OSError, yaml.YAMLError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    if data.get("memory_backend", "cloud") != "cloud":
+        return False
+    return any(not data.get(field) for field in CLOUD_REQUIRED_FIELDS)
+
+
 @app.command()
 def init(
     directory: str = typer.Option(
@@ -118,7 +141,23 @@ def init(
         typer.echo(f"added 'repo.yaml' to {result.gitignore_path}")
     else:
         typer.echo("'repo.yaml' already in .gitignore")
-    typer.echo("\nNext: edit repo.yaml, then run `kagura-engineer setup`.")
+
+    # issue #43 item 2: the shipped template uses memory_backend: cloud with
+    # blank creds, so the freshly-written file fails Config validation until the
+    # user fills them in. Surface that next step explicitly instead of a generic
+    # "edit then run setup" that hides why `setup`/`doctor` would error. Keyed
+    # off the backend we just wrote, so a (future) local-default template — or an
+    # already-validating pre-existing file — gets the plain message.
+    if result.repo_yaml_created and _written_backend_needs_creds(result.repo_yaml_path):
+        # Derive the field list from the shared SSOT so a new required cloud
+        # field is named here automatically (no hand-typed prose to drift).
+        creds = ", ".join(CLOUD_REQUIRED_FIELDS)
+        typer.echo(
+            f"\nNext: fill in the cloud credentials ({creds}) in repo.yaml — "
+            "it won't validate until you do — then run `kagura-engineer setup`."
+        )
+    else:
+        typer.echo("\nNext: edit repo.yaml, then run `kagura-engineer setup`.")
 
 
 @app.command()

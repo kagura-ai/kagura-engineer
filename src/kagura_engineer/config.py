@@ -11,6 +11,19 @@ class ConfigError(Exception):
     """Raised when repo.yaml is missing, unparseable, or fails validation."""
 
 
+# The Cloud-only fields that memory_backend="cloud" cannot function without.
+# Single source of truth (issue #43): both the model validator below
+# (_require_cloud_fields) and the CLI `init` affordance
+# (cli._written_backend_needs_creds) iterate this tuple, so adding a required
+# cloud field extends enforcement *and* the init next-step hint at once — no
+# hand-synced duplicate field lists to drift apart.
+CLOUD_REQUIRED_FIELDS: tuple[str, ...] = (
+    "memory_cloud_url",
+    "workspace_id",
+    "context_id",
+)
+
+
 class ReviewConfig(BaseModel):
     models: list[str] = Field(default_factory=list)
     max_loops: int = 3
@@ -73,9 +86,7 @@ class Config(BaseModel):
         """
         if self.memory_backend == "cloud":
             missing = [
-                name
-                for name in ("memory_cloud_url", "workspace_id", "context_id")
-                if not getattr(self, name)
+                name for name in CLOUD_REQUIRED_FIELDS if not getattr(self, name)
             ]
             if missing:
                 raise ValueError(

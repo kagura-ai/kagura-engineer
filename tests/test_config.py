@@ -2,7 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from kagura_engineer.config import Config, load_config
+import yaml
+
+from kagura_engineer.config import CLOUD_REQUIRED_FIELDS, Config, load_config
 from kagura_engineer.config import ConfigError
 
 from tests._constants import (
@@ -74,6 +76,36 @@ def test_cloud_backend_requires_cloud_fields(tmp_path):
     p = tmp_path / "repo.yaml"
     p.write_text("profile: coding\n")
     with pytest.raises(ConfigError):
+        load_config(p)
+
+
+def test_cloud_required_fields_constant_is_stable():
+    # issue #43: CLOUD_REQUIRED_FIELDS is the single source of truth for the
+    # cloud-only mandatory fields, shared by the validator and the CLI init
+    # affordance. Pin its contents so a change is a conscious edit.
+    assert set(CLOUD_REQUIRED_FIELDS) == {
+        "memory_cloud_url",
+        "workspace_id",
+        "context_id",
+    }
+
+
+@pytest.mark.parametrize("field", CLOUD_REQUIRED_FIELDS)
+def test_each_cloud_required_field_is_enforced(tmp_path, field):
+    # The validator must enforce *exactly* the fields in CLOUD_REQUIRED_FIELDS —
+    # this ties _require_cloud_fields to the shared constant so adding a field to
+    # the tuple automatically extends enforcement (no hand-sync).
+    data = {
+        "profile": "coding",
+        "memory_backend": "cloud",
+        "memory_cloud_url": "https://m",
+        "workspace_id": "w",
+        "context_id": "c",
+    }
+    data[field] = ""  # blank exactly one required field
+    p = tmp_path / "repo.yaml"
+    p.write_text(yaml.safe_dump(data))
+    with pytest.raises(ConfigError, match=field):
         load_config(p)
 
 
