@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 
 class ConfigError(Exception):
@@ -25,11 +25,21 @@ CLOUD_REQUIRED_FIELDS: tuple[str, ...] = (
 
 
 class ReviewConfig(BaseModel):
+    # Reject unknown keys so a nested typo (e.g. `review.max_loopss`) fails loudly
+    # at load time instead of being silently dropped (issue #45). Kept consistent
+    # with Config below — forbid applies at every nesting level.
+    model_config = ConfigDict(extra="forbid")
+
     models: list[str] = Field(default_factory=list)
     max_loops: int = 3
 
 
 class Config(BaseModel):
+    # Reject unknown top-level keys so a typo'd field (e.g. `workspace_idd`) fails
+    # loudly at load time with the offending key named, rather than being silently
+    # swallowed and resurfacing as a confusing downstream error (issue #45).
+    model_config = ConfigDict(extra="forbid")
+
     profile: str
     # Cloud-only fields. Optional at the field level so an offline
     # (memory_backend=local) repo.yaml needs no Memory Cloud credentials; the

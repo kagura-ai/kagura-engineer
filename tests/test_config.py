@@ -109,6 +109,42 @@ def test_each_cloud_required_field_is_enforced(tmp_path, field):
         load_config(p)
 
 
+def test_unknown_top_level_key_rejected(tmp_path, valid_repo_yaml_text):
+    # issue #45: a typo'd / unknown top-level key (e.g. workspace_idd) must fail
+    # loudly at load time with the offending key named, not be silently swallowed
+    # and resurface later as a confusing downstream error.
+    p = tmp_path / "repo.yaml"
+    p.write_text(valid_repo_yaml_text + "workspace_idd: oops\n")
+    with pytest.raises(ConfigError, match="workspace_idd"):
+        load_config(p)
+
+
+def test_unknown_nested_review_key_rejected(tmp_path, valid_repo_yaml_text):
+    # issue #45: forbid applies to the nested ReviewConfig too — a typo like
+    # review.max_loopss must be rejected, not silently dropped (otherwise the
+    # "make typos fail loud" goal is inconsistent across nesting levels).
+    p = tmp_path / "repo.yaml"
+    p.write_text(valid_repo_yaml_text + "review:\n  max_loopss: 9\n")
+    with pytest.raises(ConfigError, match="max_loopss"):
+        load_config(p)
+
+
+def test_known_keys_still_accepted_under_forbid(tmp_path, valid_repo_yaml_text):
+    # Guard against over-tightening: every legitimate field (including the
+    # optional ones and the nested review block) must still validate.
+    p = tmp_path / "repo.yaml"
+    p.write_text(
+        valid_repo_yaml_text
+        + "ollama_url: http://localhost:11434\n"
+        + "memory_mcp_config: .mcp.json\n"
+        + "memory_failover: false\n"
+        + "review:\n  models: [haiku]\n  max_loops: 5\n"
+    )
+    cfg = load_config(p)
+    assert cfg.review.max_loops == 5
+    assert cfg.memory_failover is False
+
+
 def test_missing_file_raises(tmp_path):
     with pytest.raises(ConfigError):
         load_config(tmp_path / "nope.yaml")
