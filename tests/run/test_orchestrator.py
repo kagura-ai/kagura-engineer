@@ -37,11 +37,15 @@ class _FakeMemory:
     def set_state(self, context_id, key, value): self.state[key] = value
 
 
-def _patch_boundaries(monkeypatch, *, blocking=False, phases=None):
-    """Patch guard/worktree/workflow. `phases` maps phase->PhaseInvocation."""
+def _patch_boundaries(monkeypatch, *, blocking=False, phases=None, worktree=None):
+    """Patch guard/worktree/workflow. `phases` maps phase->PhaseInvocation.
+
+    `worktree`, if given, is the path `ensure_worktree` returns — pass a real
+    tmp_path when the test inspects files the run writes there (else a fake path).
+    """
     checks = [CheckResult("gh-issue-driven", Status.FAIL if blocking else Status.OK, "x")]
     monkeypatch.setattr("kagura_engineer.run.run_all", lambda cfg: checks)
-    monkeypatch.setattr("kagura_engineer.run.ensure_worktree", lambda root, issue, base="HEAD": Path(f"/wt/run-{issue}"))
+    monkeypatch.setattr("kagura_engineer.run.ensure_worktree", lambda root, issue, base="HEAD": worktree or Path(f"/wt/run-{issue}"))
     phases = phases or {}
 
     def _invoke(phase, issue, worktree, grounding, **kw):
@@ -443,6 +447,27 @@ def test_ship_green_without_pr_url_is_fail(monkeypatch):
     assert report.pr_url is None
     assert report.resume_hint  # tells the operator how to recover
     assert not any(t == "savepoint" for t, _ in mem.remembered)  # persist never ran
+
+
+def test_ship_green_without_pr_url_persists_child_stdout(monkeypatch, tmp_path):
+    # issue #38: on the silent green-ship-no-PR FAIL, the child `claude -p`
+    # stdout is the only trace of *why* push / PR was skipped — persist it to the
+    # worktree's `.kagura/` dir and point the operator at it in the detail, so the
+    # skip is diagnosable without a re-run.
+    reasoning = "ship: I committed locally but never ran git push / gh pr create"
+    _patch_boundaries(monkeypatch, worktree=tmp_path, phases={
+        "ship": PhaseInvocation("ship", 0, reasoning, "", "green", None),
+    })
+    shas = iter(["before", "after"])  # implement produced a commit
+    monkeypatch.setattr("kagura_engineer.run.head_rev", lambda wt: next(shas))
+
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.FAIL
+    log = tmp_path / ".kagura" / "ship-stdout.log"
+    assert log.exists()
+    assert reasoning in log.read_text()
+    # the operator is pointed at the saved log from the failure detail
+    assert ".kagura" in report.phases[-1].detail
 
 
 def test_ship_guard_checks_ships_own_url_not_an_earlier_phase(monkeypatch):

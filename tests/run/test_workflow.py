@@ -334,3 +334,34 @@ def test_head_rev_returns_sha_for_repo(tmp_path):
     )
     sha = workflow.head_rev(tmp_path)
     assert sha and len(sha) >= 7
+
+
+# --- persist child stdout on a (ship) FAIL for diagnosis (issue #38) ----------
+
+
+def test_persist_phase_stdout_writes_captured_output(tmp_path):
+    # issue #38: the child `claude -p` reasoning is the only trace of *why* ship
+    # skipped push / PR, and `run --json` suppresses it. Persist it under the
+    # worktree's gitignored `.kagura/` dir so the skip is diagnosable.
+    inv = PhaseInvocation("ship", 0, "I decided to skip the PR because…", "", "green", None)
+    path = workflow.persist_phase_stdout(tmp_path, inv)
+    assert path is not None
+    assert path == tmp_path / ".kagura" / "ship-stdout.log"
+    assert path.exists()
+    assert "skip the PR" in path.read_text()
+
+
+def test_persist_phase_stdout_includes_stderr_when_present(tmp_path):
+    inv = PhaseInvocation("ship", 1, "out", "boom on stderr", None, None)
+    path = workflow.persist_phase_stdout(tmp_path, inv)
+    body = path.read_text()
+    assert "out" in body and "boom on stderr" in body
+
+
+def test_persist_phase_stdout_returns_none_on_unwritable_path(tmp_path):
+    # Best-effort: a filesystem error must return None (the FAIL is already
+    # recorded; a missing diagnostic log must never mask it or crash the run).
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a dir")  # .kagura/ parent can't be created under a file
+    inv = PhaseInvocation("ship", 0, "x", "", "green", None)
+    assert workflow.persist_phase_stdout(blocker, inv) is None
