@@ -445,6 +445,37 @@ def test_ship_green_without_pr_url_is_fail(monkeypatch):
     assert not any(t == "savepoint" for t, _ in mem.remembered)  # persist never ran
 
 
+def test_ship_green_without_pr_url_persists_child_stdout(monkeypatch, tmp_path):
+    # issue #38: on the silent green-ship-no-PR FAIL, the child `claude -p`
+    # stdout is the only trace of *why* push / PR was skipped — persist it to the
+    # worktree's `.kagura/` dir and point the operator at it in the detail, so the
+    # skip is diagnosable without a re-run.
+    monkeypatch.setattr(
+        "kagura_engineer.run.ensure_worktree",
+        lambda root, issue, base="HEAD": tmp_path,
+    )
+    monkeypatch.setattr("kagura_engineer.run.run_all",
+                        lambda cfg: [CheckResult("gh-issue-driven", Status.OK, "x")])
+    reasoning = "ship: I committed locally but never ran git push / gh pr create"
+
+    def _invoke(phase, issue, worktree, grounding, **kw):
+        if phase == "ship":
+            return PhaseInvocation("ship", 0, reasoning, "", "green", None)
+        return PhaseInvocation(phase, 0, "", "", "green", None)
+
+    monkeypatch.setattr("kagura_engineer.run.invoke_phase", _invoke)
+    shas = iter(["before", "after"])  # implement produced a commit
+    monkeypatch.setattr("kagura_engineer.run.head_rev", lambda wt: next(shas))
+
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.FAIL
+    log = tmp_path / ".kagura" / "ship-stdout.log"
+    assert log.exists()
+    assert reasoning in log.read_text()
+    # the operator is pointed at the saved log from the failure detail
+    assert ".kagura" in report.phases[-1].detail
+
+
 def test_ship_guard_checks_ships_own_url_not_an_earlier_phase(monkeypatch):
     # The guard must check ship's OWN artifact (inv.pr_url), not the accumulated
     # pr_url — a stray URL emitted by an earlier phase must not mask a ship that

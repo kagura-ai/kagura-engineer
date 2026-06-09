@@ -33,7 +33,7 @@ from .gate import evaluate
 from .memory import MemoryClient, resolve_memory_client
 from .result import STATUS_ICON, PhaseResult, RunReport, RunStatus
 from .worktree import WorktreeError, ensure_worktree
-from .workflow import head_rev, invoke_phase
+from .workflow import head_rev, invoke_phase, persist_phase_stdout
 
 _log = logging.getLogger(__name__)
 
@@ -271,14 +271,21 @@ def run_idea(
         # `pr_url`) so a stray URL from an earlier phase can't mask a ship that
         # produced none, and FAIL if it's missing.
         if phase == "ship" and not inv.pr_url:
-            _record(PhaseResult(
-                phase, RunStatus.FAIL,
+            # issue #38: this is the silent failure mode — ship went green yet
+            # skipped push / `gh pr create`, and `run --json` ate the child's
+            # reasoning. Persist that captured stdout to the worktree so the skip
+            # is diagnosable without a re-run, and point the operator at it.
+            detail = (
                 "ship reported green but produced no PR URL — the branch was not "
-                "pushed or no PR was opened, so the run did not reach a PR",
-            ))
+                "pushed or no PR was opened, so the run did not reach a PR"
+            )
+            log_path = persist_phase_stdout(wt, inv)
+            if log_path is not None:
+                detail += f"; ship stdout saved to {log_path} for diagnosis"
+            _record(PhaseResult(phase, RunStatus.FAIL, detail))
             return _finish(
                 worktree=str(wt),
-                resume_hint=f"check why ship did not open a PR, then re-run `kagura-engineer run {issue}`",
+                resume_hint=f"check why ship did not open a PR (see {log_path or 'the ship log'}), then re-run `kagura-engineer run {issue}`",
             )
         _record(PhaseResult(phase, RunStatus.OK, f"{phase} ok", verdict=decision.verdict))
 

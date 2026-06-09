@@ -57,12 +57,15 @@ to the branch + memory between phases, so each call resumes cleanly.
 """
 from __future__ import annotations
 
+import logging
 import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 from ..proc import as_text, mcp_args
+
+_log = logging.getLogger(__name__)
 
 _PHASE_TIMEOUT_S = 1800  # 30 min per phase
 
@@ -181,6 +184,33 @@ def head_rev(worktree: Path) -> str | None:
     if proc.returncode != 0:
         return None
     return proc.stdout.strip() or None
+
+
+def persist_phase_stdout(worktree: Path, inv: PhaseInvocation) -> Path | None:
+    """Persist a phase's captured child stdout to the worktree for diagnosis.
+
+    issue #38: when the ship phase reaches a FAIL having self-reported green yet
+    skipped `git push` / `gh pr create`, the child `claude -p` reasoning is the
+    only trace of *why* — and `run --json` suppresses that stdout, so it is
+    otherwise lost and the skip is undiagnosable without an expensive re-run.
+    Write it under the worktree's gitignored `.kagura/` dir (the same convention
+    `review` uses for its raw report) so a human can read the full trace after
+    the fact. stderr, when present, is appended under a separator.
+
+    Best-effort: any filesystem error returns None. The FAIL is already recorded
+    by the caller — a missing diagnostic log must never mask it or crash the run.
+    """
+    out = worktree / ".kagura" / f"{inv.phase}-stdout.log"
+    body = inv.stdout or ""
+    if inv.stderr:
+        body = f"{body}\n--- stderr ---\n{inv.stderr}"
+    try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(body, encoding="utf-8")
+    except OSError:
+        _log.exception("could not persist %s stdout to %s", inv.phase, out)
+        return None
+    return out
 
 
 def parse_verdict(text: str, phase: str | None = None) -> str | None:
