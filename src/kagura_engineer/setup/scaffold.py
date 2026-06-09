@@ -20,6 +20,12 @@ from pathlib import Path
 
 GITIGNORE_LABEL = "kagura-engineer local dev config"
 
+# The per-checkout config filename. The CLI always reads/writes `repo.yaml`
+# (hardcoded via cli._CONFIG_OPT), so this is a fixed module constant rather
+# than a parameter — collapsing the previously-dead `name` kwarg (issue #43
+# item 5).
+REPO_YAML_NAME = "repo.yaml"
+
 # A starting point the user edits — parses as YAML, documents the real Config
 # fields. Cloud fields ship empty (required only when memory_backend: cloud, see
 # config.py:_require_cloud_fields) so a local-backend checkout needs no edits.
@@ -75,22 +81,29 @@ def ensure_gitignore_entry(repo_dir: str | Path, entry: str, *, label: str) -> b
     return True
 
 
-def ensure_repo_yaml(repo_dir: str | Path, *, name: str = "repo.yaml") -> bool:
+def ensure_repo_yaml(repo_dir: str | Path) -> bool:
     """Write the ``repo.yaml`` template iff absent. Returns ``True`` if written.
 
     Never overwrites an existing file — a populated ``repo.yaml`` holds the
     user's workspace/context IDs and must be preserved.
     """
-    path = Path(repo_dir) / name
+    path = Path(repo_dir) / REPO_YAML_NAME
     if path.exists():
         return False
     path.write_text(REPO_YAML_TEMPLATE)
     return True
 
 
-def scaffold(repo_dir: str | Path, *, name: str = "repo.yaml") -> ScaffoldResult:
-    """Scaffold ``repo.yaml`` and add it to ``.gitignore`` (both idempotent)."""
+def scaffold(repo_dir: str | Path) -> ScaffoldResult:
+    """Scaffold ``repo.yaml`` and add it to ``.gitignore`` (both idempotent).
+
+    Gitignore-first ordering (issue #43 item 3): the ``.gitignore`` entry is
+    written *before* ``repo.yaml`` so that if the gitignore write fails, the
+    config file is never left on disk un-ignored. This mirrors the memory-mcp
+    step's fail-secure "gitignore-before-write-or-refuse" discipline — a user
+    who later fills in cloud credentials must never have an un-ignored file.
+    """
     root = Path(repo_dir)
-    created = ensure_repo_yaml(root, name=name)
-    updated = ensure_gitignore_entry(root, name, label=GITIGNORE_LABEL)
-    return ScaffoldResult(created, updated, root / name, root / ".gitignore")
+    updated = ensure_gitignore_entry(root, REPO_YAML_NAME, label=GITIGNORE_LABEL)
+    created = ensure_repo_yaml(root)
+    return ScaffoldResult(created, updated, root / REPO_YAML_NAME, root / ".gitignore")

@@ -1,10 +1,13 @@
 """Tests for setup.scaffold — repo.yaml + .gitignore scaffolding (issue #35)."""
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
+import pytest
 import yaml
 
+from kagura_engineer.config import Config
 from kagura_engineer.setup import scaffold
 
 
@@ -100,3 +103,63 @@ class TestScaffold:
         result = scaffold.scaffold(tmp_path)  # second run
         assert result.repo_yaml_created is False
         assert result.gitignore_updated is False
+
+    def test_gitignore_failure_does_not_leave_unignored_repo_yaml(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # issue #43 item 3: fail-secure ordering. If the .gitignore write fails,
+        # repo.yaml must NOT have been written — otherwise a secret-bearing file
+        # (a user who later fills creds) is left on disk un-ignored. Matches the
+        # memory-mcp gitignore-before-write discipline.
+        def _boom(*a: object, **k: object) -> bool:
+            raise OSError("cannot write .gitignore")
+
+        monkeypatch.setattr(scaffold, "ensure_gitignore_entry", _boom)
+        with pytest.raises(OSError):
+            scaffold.scaffold(tmp_path)
+        assert not (tmp_path / "repo.yaml").exists()
+
+
+class TestNameParamCollapsed:
+    # issue #43 item 5: the `name` kwarg on ensure_repo_yaml/scaffold was dead
+    # (never overridden — the CLI hardcodes repo.yaml via _CONFIG_OPT). It is
+    # collapsed to the module constant REPO_YAML_NAME.
+    def test_repo_yaml_name_constant_is_repo_yaml(self) -> None:
+        assert scaffold.REPO_YAML_NAME == "repo.yaml"
+
+    def test_ensure_repo_yaml_has_no_name_param(self) -> None:
+        assert "name" not in inspect.signature(scaffold.ensure_repo_yaml).parameters
+
+    def test_scaffold_has_no_name_param(self) -> None:
+        assert "name" not in inspect.signature(scaffold.scaffold).parameters
+
+
+class TestTemplateConfigRoundTrip:
+    # issue #43 item 1(a): the template is a hand-written string literal while
+    # config.py is the source of truth. Guard against drift — a renamed/added
+    # Config field that the template forgets (or a typo'd template key) is
+    # caught here instead of surfacing as a confusing validator error later.
+    def test_template_keys_are_subset_of_config_fields(self) -> None:
+        data = yaml.safe_load(scaffold.REPO_YAML_TEMPLATE)
+        assert set(data).issubset(set(Config.model_fields)), (
+            f"template keys not in Config: {set(data) - set(Config.model_fields)}"
+        )
+
+    def test_template_local_variant_round_trips_through_config(self) -> None:
+        # The template ships memory_backend: cloud with empty creds (won't
+        # validate unedited). The local variant — the only form that validates
+        # with no edits — must round-trip through Config.model_validate.
+        data = yaml.safe_load(scaffold.REPO_YAML_TEMPLATE)
+        data["memory_backend"] = "local"
+        cfg = Config.model_validate(data)
+        assert cfg.memory_backend == "local"
+        assert cfg.profile == data["profile"]
+
+    def test_template_cloud_variant_validates_when_creds_filled(self) -> None:
+        # The shipped (cloud) backend validates once the user fills the creds.
+        data = yaml.safe_load(scaffold.REPO_YAML_TEMPLATE)
+        data["memory_cloud_url"] = "https://memory.example"
+        data["workspace_id"] = "ws"
+        data["context_id"] = "ctx"
+        cfg = Config.model_validate(data)
+        assert cfg.memory_backend == "cloud"
