@@ -15,7 +15,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from kagura_claude_harness.proc import as_text
+from kagura_brain.core import as_text
 
 from .envelope import ReviewEnvelope
 

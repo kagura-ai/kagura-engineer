@@ -1,7 +1,7 @@
 """Domain MCP vocabulary kept out of the generic claude-axis harness.
 
-``kagura-claude-harness`` owns the launcher seam (``brain.invoke``) and the
-generic ``mcp_args(mcp_config, allowed_tools)`` helper, but deliberately carries
+``kagura-brain`` owns the launcher seam (the ``claude`` adapter's ``invoke``) and
+the generic ``mcp_args(mcp_config, allowed_tools)`` helper, but deliberately carries
 no memory-tool vocabulary. These are *our* tool names — the in-task
 recall/remember tools we pre-approve for headless ``claude -p`` sessions — so we
 keep them here and pass them to the harness as ``allowed_tools``.

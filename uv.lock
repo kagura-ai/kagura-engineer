@@ -866,15 +866,12 @@ wheels = [
 ]
 
 [[package]]
-name = "kagura-claude-harness"
-version = "0.1.1"
+name = "kagura-brain"
+version = "0.1.0"
 source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pydantic" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/f6/05/da034e53172c206fb77405465dca9c1be573768d45c715202578496fc1af/kagura_claude_harness-0.1.1.tar.gz", hash = "sha256:b03e3ffd65c863e49862f66e185493bab64c1e782837b5a47fbb461953ffa3f2", size = 60907, upload-time = "2026-06-09T11:50:00.516Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/69/02/7ebbad53e6c1cc5a33549de5bb7a5f4a88b20b710805176f02135c0a6929/kagura_brain-0.1.0.tar.gz", hash = "sha256:16c905afaeef6e838b1a185dfab0a9d856f483ccf0942f14cc4165b6407fd1c9", size = 63752, upload-time = "2026-06-09T17:02:28.364Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bd/ef/5ad717724c4d8de87994be366936255804cc3c006aa56ca12853993a85bc/kagura_claude_harness-0.1.1-py3-none-any.whl", hash = "sha256:d3b766a3ba6717c22da939b2e68087931accc2324eb27edc622745f4900dcc79", size = 12973, upload-time = "2026-06-09T11:49:59.094Z" },
+    { url = "https://files.pythonhosted.org/packages/64/2d/712084989bc061642ca825b5b2aae9be580429c1c94a5add8a3d097376d4/kagura_brain-0.1.0-py3-none-any.whl", hash = "sha256:b3211865a4adb37ddc61ac0d8b8e9da9fd0840305920eaaa8816f8eda4422db6", size = 20727, upload-time = "2026-06-09T17:02:27.129Z" },
 ]
 
 [[package]]
@@ -897,7 +894,7 @@ wheels = [
 name = "kagura-engineer"
 source = { editable = "." }
 dependencies = [
-    { name = "kagura-claude-harness" },
+    { name = "kagura-brain" },
     { name = "kagura-memory" },
     { name = "pydantic" },
     { name = "pyyaml" },
@@ -916,7 +913,7 @@ review = [
 
 [package.metadata]
 requires-dist = [
-    { name = "kagura-claude-harness", specifier = ">=0.1.1,<0.2" },
+    { name = "kagura-brain", specifier = ">=0.1.0,<0.2" },
     { name = "kagura-code-reviewer", marker = "extra == 'review'" },
     { name = "kagura-memory", specifier = ">=0.30,<0.31" },
     { name = "pydantic", specifier = ">=2.7" },

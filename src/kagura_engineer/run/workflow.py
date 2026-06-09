@@ -63,7 +63,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from kagura_claude_harness import brain
+from kagura_brain import claude as brain
 
 from ..mcp import MEMORY_TOOLS
 
@@ -248,8 +248,8 @@ def invoke_phase(
 ) -> PhaseInvocation:
     prompt = build_prompt(phase, issue, grounding, unattended=unattended,
                           mcp_enabled=bool(mcp_config))
-    # The headless `claude -p` launcher lives in kagura-claude-harness (#40): it
-    # owns the single launcher seam and strips a stale ANTHROPIC_API_KEY so the
+    # The headless `claude -p` launcher lives in kagura-brain's claude adapter
+    # (#40): it owns the single launcher seam and strips a stale ANTHROPIC_API_KEY so the
     # subscription auth wins (#34) — no `env -u` workaround needed. We pass our
     # memory-tool vocabulary as the pre-approved allowed_tools. OSError (claude
     # not on PATH) is deliberately NOT caught here: the run guard (doctor's
