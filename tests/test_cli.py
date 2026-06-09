@@ -587,6 +587,10 @@ def test_init_prints_cloud_creds_affordance_on_fresh_scaffold(tmp_path):
     out = result.stdout.lower()
     assert "credential" in out
     assert "validate" in out
+    # The hint names the cloud fields from the shared SSOT, not hand-typed prose,
+    # so a future required field is listed automatically (issue #43, /code-review).
+    for field in CLOUD_REQUIRED_FIELDS:
+        assert field in result.stdout
 
 
 def test_init_no_cloud_affordance_when_repo_yaml_exists(tmp_path):

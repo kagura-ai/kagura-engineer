@@ -149,10 +149,12 @@ def init(
     # off the backend we just wrote, so a (future) local-default template — or an
     # already-validating pre-existing file — gets the plain message.
     if result.repo_yaml_created and _written_backend_needs_creds(result.repo_yaml_path):
+        # Derive the field list from the shared SSOT so a new required cloud
+        # field is named here automatically (no hand-typed prose to drift).
+        creds = ", ".join(CLOUD_REQUIRED_FIELDS)
         typer.echo(
-            "\nNext: fill in the cloud credentials (memory_cloud_url, "
-            "workspace_id, context_id) in repo.yaml — it won't validate until "
-            "you do — then run `kagura-engineer setup`."
+            f"\nNext: fill in the cloud credentials ({creds}) in repo.yaml — "
+            "it won't validate until you do — then run `kagura-engineer setup`."
         )
     else:
         typer.echo("\nNext: edit repo.yaml, then run `kagura-engineer setup`.")
