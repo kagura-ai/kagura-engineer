@@ -41,6 +41,9 @@ dependencies = [
     "pydantic>=2.7",
     "pyyaml>=6.0",
     "kagura-memory>=0.30,<0.31",
+    # Owns the headless `claude -p` launcher seam (brain.invoke): subscription
+    # auth + the stale-ANTHROPIC_API_KEY strip (#34), shared across harnesses.
+    "kagura-claude-harness>=0.1.1,<0.2",
 ]
 
 [project.optional-dependencies]

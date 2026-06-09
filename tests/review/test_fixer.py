@@ -1,9 +1,19 @@
-import subprocess
-from pathlib import Path
+from kagura_claude_harness.brain import BrainResult
 
+from kagura_engineer.mcp import MEMORY_TOOLS
 from kagura_engineer.review import fixer
 from kagura_engineer.review.fixer import FixerResult
 from kagura_engineer.review.result import Finding
+
+
+def _fake_brain(stdout="", stderr="", returncode=0, timed_out=False, capture=None):
+    def _invoke(prompt, **kw):
+        if capture is not None:
+            capture["prompt"] = prompt
+            capture.update(kw)
+        return BrainResult(returncode, stdout, stderr, timed_out=timed_out)
+
+    return _invoke
 
 
 def _findings():
@@ -27,44 +37,51 @@ def test_build_fix_prompt_handles_no_report_path():
     assert "SQL injection" in prompt  # still lists findings inline
 
 
-def test_run_fixer_invokes_claude_in_repo(monkeypatch, tmp_path):
-    seen = {}
-
-    def _fake_run(cmd, **kw):
-        seen["cmd"] = cmd
-        seen["cwd"] = kw.get("cwd")
-        return subprocess.CompletedProcess(cmd, 0, "fixed and committed", "")
-
-    monkeypatch.setattr(fixer.subprocess, "run", _fake_run)
+def test_run_fixer_routes_through_harness_brain_in_repo(monkeypatch, tmp_path):
+    # run_fixer delegates to the shared brain.invoke launcher (#40) — same seam
+    # as run/workflow.py, so it inherits the #34 key-strip — and maps the
+    # BrainResult onto a FixerResult.
+    cap = {}
+    monkeypatch.setattr(
+        fixer.brain, "invoke",
+        _fake_brain(stdout="fixed and committed", capture=cap),
+    )
     res = fixer.run_fixer(tmp_path, "do the fix")
     assert isinstance(res, FixerResult)
-    assert seen["cmd"][0] == "claude" and "-p" in seen["cmd"]
-    assert "do the fix" in seen["cmd"]
-    assert seen["cwd"] == tmp_path
+    assert cap["prompt"] == "do the fix"
+    assert cap["cwd"] == tmp_path
+    assert tuple(cap["allowed_tools"]) == MEMORY_TOOLS
     assert res.returncode == 0
     assert res.timed_out is False
 
 
 def test_run_fixer_nonzero_keeps_output(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        fixer.subprocess, "run",
-        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, "", "boom"),
-    )
+    monkeypatch.setattr(fixer.brain, "invoke", _fake_brain(returncode=1, stderr="boom"))
     res = fixer.run_fixer(tmp_path, "p")
     assert res.returncode == 1
     assert "boom" in res.stderr
 
 
-def test_run_fixer_timeout_decodes_bytes(monkeypatch, tmp_path):
-    def _raise(cmd, **kw):
-        raise subprocess.TimeoutExpired(cmd, 1, output=b"partial\n", stderr=b"warn")
-
-    monkeypatch.setattr(fixer.subprocess, "run", _raise)
+def test_run_fixer_timeout_uses_detail_label(monkeypatch, tmp_path):
+    # The harness decodes partial bytes; run_fixer surfaces detail() on timeout.
+    monkeypatch.setattr(
+        fixer.brain, "invoke",
+        _fake_brain(returncode=-1, stdout="partial\n", stderr="warn", timed_out=True),
+    )
     res = fixer.run_fixer(tmp_path, "p")
     assert res.timed_out is True
     assert res.returncode == -1
-    assert isinstance(res.stdout, str) and res.stdout == "partial\n"
-    assert isinstance(res.stderr, str) and res.stderr == "warn"
+    assert res.stdout == "partial\n"
+    assert res.stderr == "warn"
+
+
+def test_run_fixer_timeout_no_output_falls_back_to_label(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        fixer.brain, "invoke", _fake_brain(returncode=-1, timed_out=True),
+    )
+    res = fixer.run_fixer(tmp_path, "p")
+    assert res.timed_out is True
+    assert res.stderr == "timed out"
 
 
 def test_build_fix_prompt_mcp_note_when_enabled():
@@ -72,13 +89,8 @@ def test_build_fix_prompt_mcp_note_when_enabled():
     assert "mcp__kagura-memory__recall" in p
 
 
-def test_run_fixer_attaches_mcp_config(monkeypatch, tmp_path):
+def test_run_fixer_forwards_mcp_config_to_brain(monkeypatch, tmp_path):
     cap = {}
-
-    def _run(cmd, **kw):
-        cap["cmd"] = cmd
-        return subprocess.CompletedProcess(cmd, 0, "", "")
-
-    monkeypatch.setattr(fixer.subprocess, "run", _run)
+    monkeypatch.setattr(fixer.brain, "invoke", _fake_brain(capture=cap))
     fixer.run_fixer(tmp_path, "p", mcp_config="/tmp/m.json")
-    assert "--mcp-config" in cap["cmd"] and "/tmp/m.json" in cap["cmd"]
+    assert cap["mcp_config"] == "/tmp/m.json"

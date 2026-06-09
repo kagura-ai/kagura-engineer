@@ -15,7 +15,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..proc import as_text
+from kagura_claude_harness.proc import as_text
+
 from .envelope import ReviewEnvelope
 
 _REVIEW_TIMEOUT_S = 1800  # 30 min — a large diff with high effort can be slow
