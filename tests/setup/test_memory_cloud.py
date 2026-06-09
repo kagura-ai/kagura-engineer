@@ -130,7 +130,18 @@ def test_oauth_login_cache_satisfies_credential(monkeypatch, tmp_path):
 
     cred = tmp_path / ".kagura" / "credentials.json"
     cred.parent.mkdir(parents=True)
-    cred.write_text(json.dumps({"default_profile": "default", "profiles": {"default": {}}}))
+    # The resolver delegates to the SDK loader (issue #36), which requires the
+    # full credential shape — a `{}` stub no longer counts as a working login.
+    full = {
+        "server": "https://memory.kagura-ai.com",
+        "mcp_url": "https://memory.kagura-ai.com/mcp",
+        "client_id": "cid",
+        "access_token": "tok",
+        "refresh_token": "rtok",
+        "token_type": "Bearer",
+        "expires_at": "2099-01-01T00:00:00+00:00",
+    }
+    cred.write_text(json.dumps({"default_profile": "default", "profiles": {"default": full}}))
 
     class _Resp:
         def read(self):

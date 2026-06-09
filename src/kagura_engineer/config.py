@@ -44,6 +44,25 @@ class Config(BaseModel):
     # Default on for resilience; set false to use the bare cloud client.
     memory_failover: bool = True
 
+    def resolve_mcp_config(self, repo_root: str | Path) -> str | None:
+        """Return the Claude Code MCP config path to attach for in-task recall.
+
+        Precedence (issue #36):
+          1. An explicit `memory_mcp_config` from repo.yaml wins verbatim — the
+             user pointed it somewhere deliberately.
+          2. Otherwise auto-discover the generated `<repo_root>/.mcp.json`
+             (written by the setup `memory-mcp` step), so an autonomous run
+             reaches the memory MCP tools with no hand-wiring.
+          3. None when neither resolves — the run falls back to string-injected
+             grounding only (the historical default).
+        """
+        if self.memory_mcp_config:
+            return self.memory_mcp_config
+        candidate = Path(repo_root) / ".mcp.json"
+        if candidate.is_file():
+            return str(candidate)
+        return None
+
     @model_validator(mode="after")
     def _require_cloud_fields(self) -> "Config":
         """Re-require the Cloud-only fields when the backend is the Cloud.

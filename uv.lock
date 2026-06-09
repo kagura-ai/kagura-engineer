@@ -904,7 +904,7 @@ review = [
 [package.metadata]
 requires-dist = [
     { name = "kagura-code-reviewer", marker = "extra == 'review'" },
-    { name = "kagura-memory", specifier = ">=0.29,<0.30" },
+    { name = "kagura-memory", specifier = ">=0.30,<0.31" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.0" },
@@ -916,7 +916,7 @@ provides-extras = ["dev", "review"]
 
 [[package]]
 name = "kagura-memory"
-version = "0.29.0"
+version = "0.30.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -925,9 +925,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/7f/a5/50d1fede7007f71e087146b33d6f48d1f36e781e44c50909deb2d410dd25/kagura_memory-0.29.0.tar.gz", hash = "sha256:f03d3cb8e3ed8c58857ed88aedd36afc5af23fb200f445c5ebfebecfccfa836c", size = 689705, upload-time = "2026-06-04T15:47:14.535Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c6/f1/f78356a4d40d8ae8891aeab5c87ae7e309570a98bb66feeb91aaebdd1216/kagura_memory-0.30.0.tar.gz", hash = "sha256:5d67214998600933e17ac57197f14e7ff2c1ac99a6bd29df2efe746f55240d8b", size = 693069, upload-time = "2026-06-08T02:18:07.866Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4a/5b/fecffe5fa7561100fabb2c99051f89469c54eda8f47c81e495fe21142029/kagura_memory-0.29.0-py3-none-any.whl", hash = "sha256:3897551afa0a6d27dcb90f50acd0c8394f8323374ca8c674ff18a51acede6f79", size = 215884, upload-time = "2026-06-04T15:47:13.083Z" },
+    { url = "https://files.pythonhosted.org/packages/45/1c/d964be64b6e87b6ee48387c10b1fd7d4c354685c5bdfad296b2610a5b277/kagura_memory-0.30.0-py3-none-any.whl", hash = "sha256:e2e4019add218a6ae13f9264c71fce08b49df4f6e82ad3bbcae01d688eeac14c", size = 217298, upload-time = "2026-06-08T02:18:06.231Z" },
 ]
 
 [[package]]

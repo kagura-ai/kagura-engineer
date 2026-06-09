@@ -127,3 +127,35 @@ def test_memory_failover_can_be_disabled():
         context_id="c", memory_failover=False,
     )
     assert cfg.memory_failover is False
+
+
+# --- resolve_mcp_config (issue #36) ------------------------------------
+
+
+def _cloud_cfg(**over):
+    from kagura_engineer.config import Config
+    base = dict(profile="coding", memory_cloud_url="https://m", workspace_id="w", context_id="c")
+    base.update(over)
+    return Config(**base)
+
+
+def test_resolve_mcp_config_explicit_override_wins(tmp_path):
+    # An explicit memory_mcp_config in repo.yaml is honoured verbatim, even
+    # when a generated .mcp.json also exists.
+    (tmp_path / ".mcp.json").write_text("{}")
+    cfg = _cloud_cfg(memory_mcp_config="/custom/path.json")
+    assert cfg.resolve_mcp_config(tmp_path) == "/custom/path.json"
+
+
+def test_resolve_mcp_config_discovers_generated_file(tmp_path):
+    # No explicit config → auto-discover the generated <repo>/.mcp.json so an
+    # autonomous run reaches memory tools without hand-wiring.
+    gen = tmp_path / ".mcp.json"
+    gen.write_text("{}")
+    cfg = _cloud_cfg()
+    assert cfg.resolve_mcp_config(tmp_path) == str(gen)
+
+
+def test_resolve_mcp_config_none_when_absent(tmp_path):
+    cfg = _cloud_cfg()
+    assert cfg.resolve_mcp_config(tmp_path) is None

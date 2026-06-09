@@ -1,0 +1,131 @@
+"""`ensure_memory_mcp_config` step: generate `<repo>/.mcp.json` (issue #36).
+
+`kagura-engineer` drives headless `claude -p` with `--mcp-config <path>` so the
+brain can reach the kagura-memory MCP tools. This step *generates* that config
+instead of requiring the user to hand-author it — closing the footgun where a
+wrong URL / header / tool-allowlist silently 401s every memory call.
+
+It consumes the kagura-memory SDK's canonical generator rather than
+re-implementing it. Two write modes, keyed off the resolved credential:
+
+  * OAuth profile present  -> **stdio form** (`kagura-mcp --profile <p>`). The
+    refresh-aware proxy owns `~/.kagura/credentials.json` and injects a fresh
+    bearer per request, so the entry holds **no secret** and never goes stale
+    after an access token's `expires_at`. This is the form our OAuth-profile
+    deployments need.
+  * `KAGURA_API_KEY` only  -> **static-token url form** (`Authorization: Bearer
+    <key>` baked in). Reserved for profile-less headless CI / service accounts;
+    Claude Code reads the header once at startup, fine for a long-lived key.
+
+Scope decision (issue #36): the engine defaults to **`.mcp.json` only**. The
+SDK's `run_setup_claude` extras are wrong for the autonomous engine — its hooks
+would fire a `remember` on every Write/Edit during a run (memory spam, latency,
+duplicating `run/memory.py`), and its skills are interactive slash commands a
+headless `claude -p` never invokes. `--full` opts into those extras for the
+"leave the repo memory-wired for a human" case.
+
+Like the sibling steps this module is side-effect free except for the single
+`.mcp.json` write (and, under `--full`, the SDK's `.claude/` install).
+"""
+from __future__ import annotations
+
+import os
+import time
+from pathlib import Path
+
+from kagura_memory.setup_claude import (
+    _write_mcp_json,
+    _write_mcp_json_stdio,
+    run_setup_claude,
+)
+
+from ..config import Config
+from .memory_auth import MemoryAuthMethod, resolve_memory_cloud_auth
+from .result import StepResult, StepStatus
+
+# Mirrors the memory-cloud / doctor hint: names both supported credential
+# sources, env-first, matching what run/memory.py actually consumes.
+_MEMORY_AUTH_HINT = (
+    "export KAGURA_API_KEY=... or run `kagura auth login` to authenticate Memory Cloud"
+)
+
+
+def ensure_memory_mcp_config(
+    cfg: Config,
+    *,
+    no_input: bool,
+    dry_run: bool,
+    full: bool = False,
+    repo_dir: Path | None = None,
+    env: dict[str, str] | None = None,
+    home: Path | None = None,
+) -> StepResult:
+    name = "memory-mcp"
+    started = time.monotonic()
+    repo_dir = repo_dir if repo_dir is not None else Path.cwd()
+    env = env if env is not None else dict(os.environ)
+
+    def _result(status: StepStatus, detail: str, fix_hint: str | None = None) -> StepResult:
+        return StepResult(
+            name, status, detail, fix_hint=fix_hint, duration_s=time.monotonic() - started
+        )
+
+    # The offline SQLite backend has no MCP memory server to point Claude at.
+    if cfg.memory_backend != "cloud":
+        return _result(
+            StepStatus.SKIPPED, f"backend={cfg.memory_backend}: no MCP memory server needed"
+        )
+
+    # Resolve the credential first. With no credential there is no usable
+    # .mcp.json to write (stdio needs a profile; static needs a key) — ask the
+    # user to authenticate rather than emitting a config that 401s every call.
+    auth = resolve_memory_cloud_auth(env=env, home=home)
+    if auth.method is MemoryAuthMethod.NONE:
+        return _result(
+            StepStatus.NEEDS_USER,
+            "no Memory Cloud credential resolves; cannot generate .mcp.json",
+            fix_hint=_MEMORY_AUTH_HINT,
+        )
+
+    mode = "stdio" if auth.method is MemoryAuthMethod.OAUTH_PROFILE else "static-token"
+    scope = "full (mcp + hooks + skills)" if full else "mcp-only"
+    target = repo_dir / ".mcp.json"
+
+    if dry_run:
+        return _result(
+            StepStatus.OK, f"dry-run: would write {target} ({mode}, {scope})"
+        )
+
+    api_key = (env.get("KAGURA_API_KEY") or "").strip() or None
+
+    try:
+        if full:
+            # The SDK generator writes .mcp.json in the SAME form (profile ->
+            # stdio, api_key -> static) plus hooks/skills/.kagura.json. Pass the
+            # profile through so OAuth deployments get the stdio (secretless)
+            # form; non_interactive avoids any TTY prompt in a headless run.
+            run_setup_claude(
+                api_key=api_key,
+                mcp_url=cfg.memory_cloud_url,
+                context_id=cfg.context_id,
+                project_dir=str(repo_dir),
+                non_interactive=True,
+                no_auto_context=True,
+                profile=auth.profile,
+            )
+        elif auth.method is MemoryAuthMethod.OAUTH_PROFILE:
+            # profile is always set when method is OAUTH_PROFILE (the resolver
+            # only returns it with a concrete profile name).
+            assert auth.profile is not None
+            _write_mcp_json_stdio(repo_dir, auth.profile)
+        else:  # ENV_API_KEY — the resolver only returns this with a non-empty key
+            assert api_key is not None
+            _write_mcp_json(repo_dir, api_key, cfg.memory_cloud_url)
+    except Exception as exc:  # noqa: BLE001 — surface any SDK leak as a clean FAIL
+        return _result(
+            StepStatus.FAIL,
+            f"failed to generate .mcp.json: {type(exc).__name__}: {exc}",
+            fix_hint="check the kagura-memory SDK install and the resolved credential",
+        )
+
+    return _result(StepStatus.OK, f"wrote {target} ({mode}, {scope})")

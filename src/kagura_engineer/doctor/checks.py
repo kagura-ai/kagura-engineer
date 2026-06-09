@@ -285,6 +285,45 @@ def check_memory_cloud(
     )
 
 
+def check_memory_mcp(
+    repo_dir: "Path",
+    *,
+    env: dict[str, str] | None = None,
+    home: "Path | None" = None,
+) -> CheckResult:
+    """Verify the generated `<repo>/.mcp.json` exists and resolves to a usable
+    memory MCP server (issue #36).
+
+    Headless `claude -p` reaches the kagura-memory tools through this file. A
+    missing/stale config means in-task recall silently degrades to no MCP tools,
+    so this is a WARN (advisory: `kagura-engineer setup` regenerates it), not a
+    hard FAIL. The credential is re-checked because a stdio config whose OAuth
+    profile has since gone away will 401 every call.
+    """
+    from kagura_memory.setup_claude import detect_mcp_json_mode
+
+    mode = detect_mcp_json_mode(Path(repo_dir))
+    if mode in ("none", "absent"):
+        return CheckResult(
+            "memory-mcp",
+            Status.WARN,
+            "no usable .mcp.json; headless recall has no MCP memory tools",
+            "run `kagura-engineer setup` to generate <repo>/.mcp.json",
+        )
+
+    auth = resolve_memory_cloud_auth(env=env, home=home)
+    if auth.method is MemoryAuthMethod.NONE:
+        return CheckResult(
+            "memory-mcp",
+            Status.WARN,
+            f".mcp.json present ({mode}) but no Memory Cloud credential resolves",
+            _MEMORY_AUTH_HINT,
+        )
+    return CheckResult(
+        "memory-mcp", Status.OK, f".mcp.json present ({mode}); auth={auth.detail}"
+    )
+
+
 def check_local_memory(path: str) -> CheckResult:
     """Verify the offline SQLite memory backend (Plan 5) can be created and
     written at `path` — the local counterpart to the cloud reachability probe."""

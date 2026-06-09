@@ -48,7 +48,7 @@ import time
 from typing import Callable
 
 from ..config import Config
-from . import claude, gh, git, memory_cloud, ollama
+from . import claude, gh, git, memory_cloud, memory_mcp, ollama
 from .platform import detect
 from .result import SetupReport, StepResult, StepStatus
 
@@ -62,31 +62,36 @@ STEP_NAMES: list[str] = [
     "ollama",
     "ollama-models",
     "memory-cloud",
+    "memory-mcp",
 ]
 
-# Per-step registry: name -> (callable, kwargs shape). The callable
-# receives (platform, config, *, no_input, dry_run). The kwargs
-# shape varies per step (e.g. ollama needs ollama_url, claude
-# takes no config) — that variance is encoded in a thin wrapper
-# closure below.
+# Per-step registry: name -> callable. Each callable receives
+# (platform, config, *, no_input, dry_run, full). The kwargs shape
+# varies per step (e.g. ollama needs ollama_url, claude takes no
+# config) — that variance is encoded in a thin wrapper closure below.
+# `full` is consumed only by memory-mcp (the `--full` opt-in that
+# additionally installs SDK hooks + skills); the rest ignore it.
 _STEP_FNS: dict[str, Callable[..., StepResult]] = {
-    "git": lambda platform, cfg, *, no_input, dry_run: git.ensure_git(
+    "git": lambda platform, cfg, *, no_input, dry_run, full: git.ensure_git(
         platform, no_input=no_input, dry_run=dry_run
     ),
-    "claude-code": lambda platform, cfg, *, no_input, dry_run: claude.ensure_claude_login(
+    "claude-code": lambda platform, cfg, *, no_input, dry_run, full: claude.ensure_claude_login(
         no_input=no_input, dry_run=dry_run
     ),
-    "gh": lambda platform, cfg, *, no_input, dry_run: gh.ensure_gh_auth(
+    "gh": lambda platform, cfg, *, no_input, dry_run, full: gh.ensure_gh_auth(
         platform, no_input=no_input, dry_run=dry_run
     ),
-    "ollama": lambda platform, cfg, *, no_input, dry_run: ollama.ensure_ollama_up(
+    "ollama": lambda platform, cfg, *, no_input, dry_run, full: ollama.ensure_ollama_up(
         platform, cfg.ollama_url, no_input=no_input, dry_run=dry_run
     ),
-    "ollama-models": lambda platform, cfg, *, no_input, dry_run: ollama.pull_ollama_models(
+    "ollama-models": lambda platform, cfg, *, no_input, dry_run, full: ollama.pull_ollama_models(
         platform, cfg.ollama_url, cfg.review.models, no_input=no_input, dry_run=dry_run
     ),
-    "memory-cloud": lambda platform, cfg, *, no_input, dry_run: memory_cloud.ensure_memory_cloud_reachable(
+    "memory-cloud": lambda platform, cfg, *, no_input, dry_run, full: memory_cloud.ensure_memory_cloud_reachable(
         cfg.memory_cloud_url, no_input=no_input, dry_run=dry_run
+    ),
+    "memory-mcp": lambda platform, cfg, *, no_input, dry_run, full: memory_mcp.ensure_memory_mcp_config(
+        cfg, no_input=no_input, dry_run=dry_run, full=full
     ),
 }
 
@@ -110,6 +115,7 @@ def run_plan(
     no_input: bool,
     dry_run: bool,
     only: str | None = None,
+    full: bool = False,
 ) -> SetupReport:
     """Execute the build plan and aggregate results into a SetupReport.
 
@@ -117,6 +123,9 @@ def run_plan(
     filtered step when `only` is set). Per-step exceptions are
     caught and converted to FAIL StepResults — a single broken
     step never aborts the rest of the plan.
+
+    `full` is the `--full` opt-in: it reaches the memory-mcp step so the
+    SDK additionally installs hooks + skills (default: `.mcp.json` only).
     """
     platform = detect()
     plan = build_plan(only=only)
@@ -129,7 +138,7 @@ def run_plan(
     for name in plan:
         fn = _STEP_FNS[name]
         try:
-            result = fn(platform, cfg, no_input=no_input, dry_run=dry_run)
+            result = fn(platform, cfg, no_input=no_input, dry_run=dry_run, full=full)
         except Exception as exc:  # noqa: BLE001 — see module docstring
             _log.exception("setup step %r raised", name)
             result = StepResult(

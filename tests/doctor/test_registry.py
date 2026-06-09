@@ -18,6 +18,7 @@ def test_run_all_invokes_every_check(monkeypatch, valid_config):
     monkeypatch.setattr(registry.checks, "check_ollama", _stub("ollama"))
     monkeypatch.setattr(registry.checks, "check_haiku", _stub("haiku"))
     monkeypatch.setattr(registry.checks, "check_memory_cloud", _stub("memory-cloud"))
+    monkeypatch.setattr(registry.checks, "check_memory_mcp", _stub("memory-mcp"))
     monkeypatch.setattr(registry.checks, "check_gh_issue_driven", _stub("gh-issue-driven"))
 
     results = registry.run_all(valid_config)
@@ -28,9 +29,10 @@ def test_run_all_invokes_every_check(monkeypatch, valid_config):
         "ollama",
         "haiku",
         "memory-cloud",
+        "memory-mcp",
         "gh-issue-driven",
     }
-    assert len(calls) == 7
+    assert len(calls) == 8
 
 
 def test_overall_status_is_worst():
@@ -84,6 +86,11 @@ def test_run_all_isolates_check_exceptions(monkeypatch, valid_config):
     )
     monkeypatch.setattr(
         registry.checks,
+        "check_memory_mcp",
+        lambda *a, **k: CheckResult("memory-mcp", Status.OK, "ok"),
+    )
+    monkeypatch.setattr(
+        registry.checks,
         "check_gh_issue_driven",
         lambda: CheckResult("gh-issue-driven", Status.OK, "ok"),
     )
@@ -101,6 +108,7 @@ def test_run_all_isolates_check_exceptions(monkeypatch, valid_config):
         "ollama",
         "haiku",
         "memory-cloud",
+        "memory-mcp",
         "gh-issue-driven",
     }
     assert all(
@@ -129,3 +137,6 @@ def test_run_all_uses_local_memory_check_when_backend_local(monkeypatch, valid_c
     results = registry.run_all(local_cfg)
     assert called["local"] == 1 and called["cloud"] == 0
     assert any(r.name == "memory-local" for r in results)
+    # The MCP-config check is cloud-only: the offline SQLite backend has no
+    # MCP memory server, so no memory-mcp row appears for a local repo.
+    assert not any(r.name == "memory-mcp" for r in results)
