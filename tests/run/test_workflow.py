@@ -1,7 +1,25 @@
 import subprocess
 
+from kagura_claude_harness.brain import BrainResult
+
+from kagura_engineer.mcp import MEMORY_TOOLS
 from kagura_engineer.run import workflow
 from kagura_engineer.run.workflow import PhaseInvocation
+
+
+def _fake_brain(stdout="", stderr="", returncode=0, timed_out=False, capture=None):
+    """Build a stand-in for ``brain.invoke`` that returns a fixed BrainResult.
+
+    When ``capture`` (a dict) is given, the call's kwargs are recorded into it so
+    a test can assert what ``invoke_phase`` forwarded to the launcher seam.
+    """
+    def _invoke(prompt, **kw):
+        if capture is not None:
+            capture["prompt"] = prompt
+            capture.update(kw)
+        return BrainResult(returncode, stdout, stderr, timed_out=timed_out)
+
+    return _invoke
 
 
 def test_build_prompt_includes_command_grounding_and_marker_request():
@@ -146,20 +164,20 @@ def test_parse_verdict_gate1_marker_does_not_map_pass():
 
 
 def test_invoke_phase_ship_marker_fail_resolves_to_red(monkeypatch, tmp_path):
-    def _run(cmd, **kw):
-        return subprocess.CompletedProcess(cmd, 0, "gate2 blocked\nKAGURA_VERDICT=fail\n", "")
-
-    monkeypatch.setattr(workflow.subprocess, "run", _run)
+    monkeypatch.setattr(
+        workflow.brain, "invoke",
+        _fake_brain(stdout="gate2 blocked\nKAGURA_VERDICT=fail\n"),
+    )
     assert workflow.invoke_phase("ship", 3, tmp_path, []).verdict == "red"
 
 
 def test_invoke_phase_ship_native_pass_resolves_to_green(monkeypatch, tmp_path):
     # End-to-end: a ship phase that drops the marker but closes `## Verdict: pass`
     # must resolve to a proceed verdict, not halt.
-    def _run(cmd, **kw):
-        return subprocess.CompletedProcess(cmd, 0, "gate2 done\n## Verdict: pass\n", "")
-
-    monkeypatch.setattr(workflow.subprocess, "run", _run)
+    monkeypatch.setattr(
+        workflow.brain, "invoke",
+        _fake_brain(stdout="gate2 done\n## Verdict: pass\n"),
+    )
     inv = workflow.invoke_phase("ship", 3, tmp_path, [])
     assert inv.verdict == "green"
 
@@ -173,27 +191,32 @@ def test_parse_pr_url_none_when_absent_or_dash():
     assert workflow.parse_pr_url("nothing") is None
 
 
-def test_invoke_phase_runs_claude_in_worktree_and_parses(monkeypatch, tmp_path):
-    def _fake_run(cmd, **kw):
-        assert cmd[0] == "claude" and "-p" in cmd
-        assert kw["cwd"] == tmp_path
-        return subprocess.CompletedProcess(
-            cmd, 0, "work...\nKAGURA_VERDICT=green\nKAGURA_PR_URL=https://x/pull/1\n", ""
-        )
-
-    monkeypatch.setattr(workflow.subprocess, "run", _fake_run)
+def test_invoke_phase_routes_through_harness_brain_and_parses(monkeypatch, tmp_path):
+    # invoke_phase no longer constructs a `claude -p` argv itself — it delegates
+    # to the harness brain.invoke seam (which owns the #34 key-strip) and maps
+    # the BrainResult back onto a PhaseInvocation.
+    cap = {}
+    monkeypatch.setattr(
+        workflow.brain, "invoke",
+        _fake_brain(
+            stdout="work...\nKAGURA_VERDICT=green\nKAGURA_PR_URL=https://x/pull/1\n",
+            capture=cap,
+        ),
+    )
     inv = workflow.invoke_phase("ship", 3, tmp_path, ["g"])
     assert isinstance(inv, PhaseInvocation)
     assert inv.verdict == "green"
     assert inv.pr_url == "https://x/pull/1"
     assert inv.returncode == 0
     assert inv.phase == "ship"
+    # Forwarded to the launcher seam: worktree cwd + the pre-approved memory tools.
+    assert cap["cwd"] == tmp_path
+    assert tuple(cap["allowed_tools"]) == MEMORY_TOOLS
 
 
 def test_invoke_phase_nonzero_returncode_keeps_output(monkeypatch, tmp_path):
     monkeypatch.setattr(
-        workflow.subprocess, "run",
-        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, "", "boom"),
+        workflow.brain, "invoke", _fake_brain(returncode=1, stderr="boom"),
     )
     inv = workflow.invoke_phase("start", 3, tmp_path, [])
     assert inv.returncode == 1
@@ -202,37 +225,27 @@ def test_invoke_phase_nonzero_returncode_keeps_output(monkeypatch, tmp_path):
 
 
 def test_invoke_phase_timeout_returns_marker(monkeypatch, tmp_path):
-    def _raise(cmd, **kw):
-        raise subprocess.TimeoutExpired(cmd, 1)
-
-    monkeypatch.setattr(workflow.subprocess, "run", _raise)
+    # No output at all: the timeout label falls back to BrainResult.detail().
+    monkeypatch.setattr(
+        workflow.brain, "invoke",
+        _fake_brain(returncode=-1, timed_out=True),
+    )
     inv = workflow.invoke_phase("start", 3, tmp_path, [])
     assert inv.returncode == -1
     assert inv.timed_out is True
+    assert inv.stderr == "timed out"
 
 
 def test_invoke_phase_timeout_preserves_partial_output(monkeypatch, tmp_path):
-    def _raise(cmd, **kw):
-        raise subprocess.TimeoutExpired(cmd, 1, output="partial work\n", stderr="warn")
-
-    monkeypatch.setattr(workflow.subprocess, "run", _raise)
+    # detail() surfaces real stderr over the generic label; partial stdout is kept.
+    monkeypatch.setattr(
+        workflow.brain, "invoke",
+        _fake_brain(returncode=-1, stdout="partial work\n", stderr="warn", timed_out=True),
+    )
     inv = workflow.invoke_phase("start", 3, tmp_path, [])
     assert inv.timed_out is True
     assert inv.stdout == "partial work\n"
     assert inv.stderr == "warn"
-
-
-def test_invoke_phase_timeout_decodes_bytes_output(monkeypatch, tmp_path):
-    # Real timeouts deliver bytes even under text=True; PhaseInvocation fields
-    # are typed str and downstream parse_verdict does str ops — must be decoded.
-    def _raise(cmd, **kw):
-        raise subprocess.TimeoutExpired(cmd, 1, output=b"partial\n", stderr=b"warn")
-
-    monkeypatch.setattr(workflow.subprocess, "run", _raise)
-    inv = workflow.invoke_phase("start", 3, tmp_path, [])
-    assert inv.timed_out is True
-    assert isinstance(inv.stdout, str) and inv.stdout == "partial\n"
-    assert isinstance(inv.stderr, str) and inv.stderr == "warn"
 
 
 def test_build_prompt_unattended_adds_instruction():
@@ -245,15 +258,13 @@ def test_build_prompt_default_has_no_unattended():
 
 
 def test_invoke_phase_forwards_unattended_into_prompt(monkeypatch, tmp_path):
-    captured = {}
-
-    def _run(cmd, **kw):
-        captured["prompt"] = cmd[cmd.index("-p") + 1]
-        return subprocess.CompletedProcess(cmd, 0, "KAGURA_VERDICT=green\n", "")
-
-    monkeypatch.setattr(workflow.subprocess, "run", _run)
+    cap = {}
+    monkeypatch.setattr(
+        workflow.brain, "invoke",
+        _fake_brain(stdout="KAGURA_VERDICT=green\n", capture=cap),
+    )
     workflow.invoke_phase("ship", 2, tmp_path, [], unattended=True)
-    assert "UNATTENDED" in captured["prompt"]
+    assert "UNATTENDED" in cap["prompt"]
 
 
 def test_build_prompt_mcp_note_when_enabled():
@@ -266,28 +277,21 @@ def test_build_prompt_no_mcp_note_by_default():
     assert "mcp__kagura-memory" not in workflow.build_prompt("start", 1, [])
 
 
-def test_invoke_phase_attaches_mcp_config(monkeypatch, tmp_path):
+def test_invoke_phase_forwards_mcp_config_to_brain(monkeypatch, tmp_path):
     cap = {}
-
-    def _run(cmd, **kw):
-        cap["cmd"] = cmd
-        return subprocess.CompletedProcess(cmd, 0, "KAGURA_VERDICT=green\n", "")
-
-    monkeypatch.setattr(workflow.subprocess, "run", _run)
+    monkeypatch.setattr(
+        workflow.brain, "invoke",
+        _fake_brain(stdout="KAGURA_VERDICT=green\n", capture=cap),
+    )
     workflow.invoke_phase("ship", 2, tmp_path, [], mcp_config="/tmp/m.json")
-    assert "--mcp-config" in cap["cmd"] and "/tmp/m.json" in cap["cmd"]
+    assert cap["mcp_config"] == "/tmp/m.json"
 
 
-def test_invoke_phase_no_mcp_flags_by_default(monkeypatch, tmp_path):
+def test_invoke_phase_no_mcp_config_by_default(monkeypatch, tmp_path):
     cap = {}
-
-    def _run(cmd, **kw):
-        cap["cmd"] = cmd
-        return subprocess.CompletedProcess(cmd, 0, "", "")
-
-    monkeypatch.setattr(workflow.subprocess, "run", _run)
+    monkeypatch.setattr(workflow.brain, "invoke", _fake_brain(capture=cap))
     workflow.invoke_phase("ship", 2, tmp_path, [])
-    assert "--mcp-config" not in cap["cmd"]
+    assert cap["mcp_config"] is None
 
 
 # --- issue #9: the implement phase ----------------------------------------

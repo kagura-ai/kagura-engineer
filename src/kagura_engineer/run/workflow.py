@@ -63,7 +63,9 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..proc import as_text, mcp_args
+from kagura_claude_harness import brain
+
+from ..mcp import MEMORY_TOOLS
 
 _log = logging.getLogger(__name__)
 
@@ -246,22 +248,26 @@ def invoke_phase(
 ) -> PhaseInvocation:
     prompt = build_prompt(phase, issue, grounding, unattended=unattended,
                           mcp_enabled=bool(mcp_config))
-    # OSError (claude not on PATH) is deliberately NOT caught here: the
-    # run guard (doctor's blocking gh-issue-driven/claude check) verifies
-    # claude is launchable before invoke_phase is ever reached.
-    try:
-        proc = subprocess.run(
-            ["claude", "-p", prompt, *mcp_args(mcp_config)],
-            cwd=worktree, capture_output=True, text=True, timeout=timeout,
-        )
-    except subprocess.TimeoutExpired as exc:
-        # Preserve any partial output captured before the kill — invaluable
-        # for diagnosing what a 30-min phase was doing when it stalled.
+    # The headless `claude -p` launcher lives in kagura-claude-harness (#40): it
+    # owns the single launcher seam and strips a stale ANTHROPIC_API_KEY so the
+    # subscription auth wins (#34) — no `env -u` workaround needed. We pass our
+    # memory-tool vocabulary as the pre-approved allowed_tools. OSError (claude
+    # not on PATH) is deliberately NOT caught here: the run guard (doctor's
+    # blocking gh-issue-driven/claude check) verifies claude is launchable
+    # before invoke_phase is ever reached.
+    result = brain.invoke(
+        prompt, cwd=worktree, timeout=timeout,
+        mcp_config=mcp_config, allowed_tools=MEMORY_TOOLS,
+    )
+    if result.timed_out:
+        # Preserve any partial output captured before the kill — invaluable for
+        # diagnosing what a stalled phase was doing. detail() supplies the
+        # "timed out" label only when there is no real output to show instead.
         return PhaseInvocation(
-            phase, -1, as_text(exc.stdout), as_text(exc.stderr) or "timed out",
+            phase, result.returncode, result.stdout, result.detail(),
             None, None, timed_out=True,
         )
     return PhaseInvocation(
-        phase, proc.returncode, proc.stdout, proc.stderr,
-        parse_verdict(proc.stdout, phase), parse_pr_url(proc.stdout),
+        phase, result.returncode, result.stdout, result.stderr,
+        parse_verdict(result.stdout, phase), parse_pr_url(result.stdout),
     )

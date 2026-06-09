@@ -13,11 +13,12 @@ re-review's `git diff base..HEAD` sees the change) but NOT push.
 """
 from __future__ import annotations
 
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..proc import as_text, mcp_args
+from kagura_claude_harness import brain
+
+from ..mcp import MEMORY_TOOLS
 from .result import Finding
 
 _FIX_TIMEOUT_S = 1800  # 30 min — match run's phase timeout
@@ -66,14 +67,15 @@ def build_fix_prompt(
 def run_fixer(
     repo: Path, prompt: str, *, mcp_config: str | None = None, timeout: int = _FIX_TIMEOUT_S
 ) -> FixerResult:
-    # OSError (claude not on PATH) is NOT caught here — the loop's guard
-    # (doctor's blocking claude check) verifies claude is launchable first,
-    # and the loop converts any leak to a clean FAIL. Mirrors run/workflow.py.
-    try:
-        proc = subprocess.run(
-            ["claude", "-p", prompt, *mcp_args(mcp_config)],
-            cwd=repo, capture_output=True, text=True, timeout=timeout,
-        )
-    except subprocess.TimeoutExpired as exc:
-        return FixerResult(-1, as_text(exc.stdout), as_text(exc.stderr) or "timed out", timed_out=True)
-    return FixerResult(proc.returncode, proc.stdout, proc.stderr)
+    # Delegates to the shared kagura-claude-harness launcher seam (#40), the
+    # same one run/workflow.py uses — so it inherits the stale-ANTHROPIC_API_KEY
+    # strip (#34). OSError (claude not on PATH) is NOT caught here — the loop's
+    # guard (doctor's blocking claude check) verifies claude is launchable first,
+    # and the loop converts any leak to a clean FAIL.
+    result = brain.invoke(
+        prompt, cwd=repo, timeout=timeout,
+        mcp_config=mcp_config, allowed_tools=MEMORY_TOOLS,
+    )
+    if result.timed_out:
+        return FixerResult(result.returncode, result.stdout, result.detail(), timed_out=True)
+    return FixerResult(result.returncode, result.stdout, result.stderr)
