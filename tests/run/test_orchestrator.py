@@ -37,11 +37,15 @@ class _FakeMemory:
     def set_state(self, context_id, key, value): self.state[key] = value
 
 
-def _patch_boundaries(monkeypatch, *, blocking=False, phases=None):
-    """Patch guard/worktree/workflow. `phases` maps phase->PhaseInvocation."""
+def _patch_boundaries(monkeypatch, *, blocking=False, phases=None, worktree=None):
+    """Patch guard/worktree/workflow. `phases` maps phase->PhaseInvocation.
+
+    `worktree`, if given, is the path `ensure_worktree` returns — pass a real
+    tmp_path when the test inspects files the run writes there (else a fake path).
+    """
     checks = [CheckResult("gh-issue-driven", Status.FAIL if blocking else Status.OK, "x")]
     monkeypatch.setattr("kagura_engineer.run.run_all", lambda cfg: checks)
-    monkeypatch.setattr("kagura_engineer.run.ensure_worktree", lambda root, issue, base="HEAD": Path(f"/wt/run-{issue}"))
+    monkeypatch.setattr("kagura_engineer.run.ensure_worktree", lambda root, issue, base="HEAD": worktree or Path(f"/wt/run-{issue}"))
     phases = phases or {}
 
     def _invoke(phase, issue, worktree, grounding, **kw):
@@ -450,20 +454,10 @@ def test_ship_green_without_pr_url_persists_child_stdout(monkeypatch, tmp_path):
     # stdout is the only trace of *why* push / PR was skipped — persist it to the
     # worktree's `.kagura/` dir and point the operator at it in the detail, so the
     # skip is diagnosable without a re-run.
-    monkeypatch.setattr(
-        "kagura_engineer.run.ensure_worktree",
-        lambda root, issue, base="HEAD": tmp_path,
-    )
-    monkeypatch.setattr("kagura_engineer.run.run_all",
-                        lambda cfg: [CheckResult("gh-issue-driven", Status.OK, "x")])
     reasoning = "ship: I committed locally but never ran git push / gh pr create"
-
-    def _invoke(phase, issue, worktree, grounding, **kw):
-        if phase == "ship":
-            return PhaseInvocation("ship", 0, reasoning, "", "green", None)
-        return PhaseInvocation(phase, 0, "", "", "green", None)
-
-    monkeypatch.setattr("kagura_engineer.run.invoke_phase", _invoke)
+    _patch_boundaries(monkeypatch, worktree=tmp_path, phases={
+        "ship": PhaseInvocation("ship", 0, reasoning, "", "green", None),
+    })
     shas = iter(["before", "after"])  # implement produced a commit
     monkeypatch.setattr("kagura_engineer.run.head_rev", lambda wt: next(shas))
 

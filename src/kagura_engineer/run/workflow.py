@@ -189,19 +189,16 @@ def head_rev(worktree: Path) -> str | None:
 def persist_phase_stdout(worktree: Path, inv: PhaseInvocation) -> Path | None:
     """Persist a phase's captured child stdout to the worktree for diagnosis.
 
-    issue #38: when the ship phase reaches a FAIL having self-reported green yet
-    skipped `git push` / `gh pr create`, the child `claude -p` reasoning is the
-    only trace of *why* — and `run --json` suppresses that stdout, so it is
-    otherwise lost and the skip is undiagnosable without an expensive re-run.
-    Write it under the worktree's gitignored `.kagura/` dir (the same convention
-    `review` uses for its raw report) so a human can read the full trace after
-    the fact. stderr, when present, is appended under a separator.
-
-    Best-effort: any filesystem error returns None. The FAIL is already recorded
-    by the caller — a missing diagnostic log must never mask it or crash the run.
+    `run --json` suppresses the child `claude -p` stdout, so when a phase FAILs
+    its reasoning is otherwise lost. Write it under the worktree's gitignored
+    `.kagura/<phase>-stdout.log` (the convention `review` uses for its raw
+    report) so a human can read the full trace; stderr, when present, is
+    appended under a separator. Best-effort — any filesystem error returns None
+    so a missing diagnostic log never masks the already-recorded FAIL (issue
+    #38: the silent green-ship-no-PR skip is the motivating case).
     """
     out = worktree / ".kagura" / f"{inv.phase}-stdout.log"
-    body = inv.stdout or ""
+    body = inv.stdout
     if inv.stderr:
         body = f"{body}\n--- stderr ---\n{inv.stderr}"
     try:
