@@ -1,7 +1,7 @@
-"""Guards for the #40 single-launcher migration onto kagura-claude-harness.
+"""Guards for the #40 single-launcher migration onto kagura-brain.
 
 After #40 the headless `claude -p` launcher is owned solely by
-`kagura_claude_harness.brain.invoke`. No kagura-engineer source may construct a
+`kagura_brain.claude.invoke`. No kagura-engineer source may construct a
 `claude -p` argv of its own — that is the unhardened twin (#34) the migration
 removed. These tests are the regression backstop for that contract.
 """
@@ -31,6 +31,6 @@ def test_no_claude_p_argv_constructed_in_source():
         if _CLAUDE_P_ARGV.search(py.read_text(encoding="utf-8"))
     ]
     assert not offenders, (
-        "claude -p argv must be built only by kagura-claude-harness, "
+        "claude -p argv must be built only by kagura-brain, "
         f"but these modules construct one: {offenders}"
     )

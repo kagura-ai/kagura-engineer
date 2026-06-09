@@ -1,6 +1,6 @@
 import subprocess
 
-from kagura_claude_harness.brain import BrainResult
+from kagura_brain.core import BrainResult
 
 from kagura_engineer.mcp import MEMORY_TOOLS
 from kagura_engineer.run import workflow

@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from kagura_claude_harness import brain
+from kagura_brain import claude as brain
 
 from ..mcp import MEMORY_TOOLS
 from .result import Finding
@@ -67,8 +67,8 @@ def build_fix_prompt(
 def run_fixer(
     repo: Path, prompt: str, *, mcp_config: str | None = None, timeout: int = _FIX_TIMEOUT_S
 ) -> FixerResult:
-    # Delegates to the shared kagura-claude-harness launcher seam (#40), the
-    # same one run/workflow.py uses — so it inherits the stale-ANTHROPIC_API_KEY
+    # Delegates to the shared kagura-brain claude-adapter launcher seam (#40),
+    # the same one run/workflow.py uses — so it inherits the stale-ANTHROPIC_API_KEY
     # strip (#34). OSError (claude not on PATH) is NOT caught here — the loop's
     # guard (doctor's blocking claude check) verifies claude is launchable first,
     # and the loop converts any leak to a clean FAIL.
