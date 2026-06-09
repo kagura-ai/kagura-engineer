@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import typer
 
 from . import __version__
@@ -22,6 +24,7 @@ from .review.render import to_json as review_to_json
 from .setup import STEP_NAMES, build_plan, run_plan
 from .setup.render import print_table as setup_print_table
 from .setup.render import to_json as setup_to_json
+from .setup.scaffold import scaffold
 
 app = typer.Typer(help="Autonomous coding harness over Claude Code + Kagura Memory.")
 
@@ -89,6 +92,29 @@ def _check_fix_name(only: str | None, plan: list[str]) -> str | None:
             f"valid names: {', '.join(STEP_NAMES)}"
         )
     return None
+
+
+@app.command()
+def init(
+    directory: str = typer.Option(
+        ".", "--dir", "-d", help="repo root to scaffold (default: current directory)"
+    ),
+) -> None:
+    """Scaffold a repo.yaml template and add it to .gitignore.
+
+    Idempotent and never overwrites an existing repo.yaml — safe to re-run. Run
+    this first in a new checkout, then edit repo.yaml and run `setup`.
+    """
+    result = scaffold(Path(directory))
+    if result.repo_yaml_created:
+        typer.echo(f"created {result.repo_yaml_path}")
+    else:
+        typer.echo(f"{result.repo_yaml_path} already exists — left unchanged")
+    if result.gitignore_updated:
+        typer.echo(f"added 'repo.yaml' to {result.gitignore_path}")
+    else:
+        typer.echo("'repo.yaml' already in .gitignore")
+    typer.echo("\nNext: edit repo.yaml, then run `kagura-engineer setup`.")
 
 
 @app.command()

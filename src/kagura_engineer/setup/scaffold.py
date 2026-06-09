@@ -1,0 +1,96 @@
+"""Scaffold a per-checkout `repo.yaml` and keep it out of git (issue #35).
+
+`config.py` only *reads* `repo.yaml` and hard-raises when it is missing, and
+nothing added it to `.gitignore` — so a fresh checkout starts with no config,
+and a hand-authored one carrying `workspace_id`/`context_id` is easy to commit
+by accident. The `init` command (and any caller) uses this module to:
+
+  1. write a commented `repo.yaml` template **iff absent** (never overwrites), and
+  2. idempotently add `repo.yaml` to `.gitignore` under a labeled block.
+
+`ensure_gitignore_entry` is deliberately generic (entry + label) so the
+memory-mcp step can route its generated `.mcp.json` through the same helper —
+that file's static-token form carries a bearer key and has the same
+keep-it-out-of-git need.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+GITIGNORE_LABEL = "kagura-engineer local dev config"
+
+# A starting point the user edits — parses as YAML, documents the real Config
+# fields. Cloud fields ship empty (required only when memory_backend: cloud, see
+# config.py:_require_cloud_fields) so a local-backend checkout needs no edits.
+REPO_YAML_TEMPLATE = """\
+# kagura-engineer per-checkout config (repo.yaml).
+# Local-dev only — git-ignored by `kagura-engineer init`. Fill in the values for
+# your checkout, then run `kagura-engineer doctor` to verify.
+
+# Free-form profile label for this checkout (e.g. "dev", "ci").
+profile: dev
+
+# Memory backend: "cloud" (Kagura Memory Cloud) or "local" (offline SQLite).
+memory_backend: cloud
+
+# --- Cloud backend fields (required when memory_backend: cloud) ---
+# Memory Cloud base URL and the workspace/context this repo writes to.
+memory_cloud_url: ""
+workspace_id: ""
+context_id: ""
+
+# --- Local backend (used only when memory_backend: local) ---
+# local_memory_path: .kagura/memory.db
+
+# Ollama endpoint for the cost-free reviewer.
+ollama_url: "http://localhost:11434"
+"""
+
+
+@dataclass(frozen=True)
+class ScaffoldResult:
+    repo_yaml_created: bool
+    gitignore_updated: bool
+    repo_yaml_path: Path
+    gitignore_path: Path
+
+
+def ensure_gitignore_entry(repo_dir: str | Path, entry: str, *, label: str) -> bool:
+    """Idempotently add ``entry`` to ``<repo_dir>/.gitignore``.
+
+    Returns ``True`` if the file was written (created or appended), ``False`` if
+    ``entry`` was already a line (the skip check matches the literal entry line,
+    not the label — a bare pre-existing line must not be duplicated). Creates the
+    file when absent and tolerates an existing file with no trailing newline.
+    """
+    path = Path(repo_dir) / ".gitignore"
+    existing = path.read_text() if path.exists() else ""
+    if entry in existing.splitlines():
+        return False
+    if existing and not existing.endswith("\n"):
+        existing += "\n"
+    separator = "\n" if existing else ""  # blank line before an appended block
+    path.write_text(f"{existing}{separator}# {label}\n{entry}\n")
+    return True
+
+
+def ensure_repo_yaml(repo_dir: str | Path, *, name: str = "repo.yaml") -> bool:
+    """Write the ``repo.yaml`` template iff absent. Returns ``True`` if written.
+
+    Never overwrites an existing file — a populated ``repo.yaml`` holds the
+    user's workspace/context IDs and must be preserved.
+    """
+    path = Path(repo_dir) / name
+    if path.exists():
+        return False
+    path.write_text(REPO_YAML_TEMPLATE)
+    return True
+
+
+def scaffold(repo_dir: str | Path, *, name: str = "repo.yaml") -> ScaffoldResult:
+    """Scaffold ``repo.yaml`` and add it to ``.gitignore`` (both idempotent)."""
+    root = Path(repo_dir)
+    created = ensure_repo_yaml(root, name=name)
+    updated = ensure_gitignore_entry(root, name, label=GITIGNORE_LABEL)
+    return ScaffoldResult(created, updated, root / name, root / ".gitignore")

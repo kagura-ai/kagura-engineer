@@ -82,6 +82,13 @@ def test_missing_file_raises(tmp_path):
         load_config(tmp_path / "nope.yaml")
 
 
+def test_missing_file_message_points_at_init(tmp_path):
+    # A fresh checkout has no repo.yaml; the error must tell the user how to
+    # scaffold one (issue #35) rather than just reporting the absence.
+    with pytest.raises(ConfigError, match="init"):
+        load_config(tmp_path / "repo.yaml")
+
+
 def test_unreadable_file_raises_config_error(tmp_path, monkeypatch, valid_repo_yaml_text):
     # File exists (is_file() True) but read_text() raises PermissionError
     # (mode 000 / owned by another user). The loader's docstring promises

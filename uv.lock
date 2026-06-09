@@ -866,6 +866,18 @@ wheels = [
 ]
 
 [[package]]
+name = "kagura-claude-harness"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f6/05/da034e53172c206fb77405465dca9c1be573768d45c715202578496fc1af/kagura_claude_harness-0.1.1.tar.gz", hash = "sha256:b03e3ffd65c863e49862f66e185493bab64c1e782837b5a47fbb461953ffa3f2", size = 60907, upload-time = "2026-06-09T11:50:00.516Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bd/ef/5ad717724c4d8de87994be366936255804cc3c006aa56ca12853993a85bc/kagura_claude_harness-0.1.1-py3-none-any.whl", hash = "sha256:d3b766a3ba6717c22da939b2e68087931accc2324eb27edc622745f4900dcc79", size = 12973, upload-time = "2026-06-09T11:49:59.094Z" },
+]
+
+[[package]]
 name = "kagura-code-reviewer"
 version = "0.1.1"
 source = { registry = "https://pypi.org/simple" }
@@ -885,6 +897,7 @@ wheels = [
 name = "kagura-engineer"
 source = { editable = "." }
 dependencies = [
+    { name = "kagura-claude-harness" },
     { name = "kagura-memory" },
     { name = "pydantic" },
     { name = "pyyaml" },
@@ -903,6 +916,7 @@ review = [
 
 [package.metadata]
 requires-dist = [
+    { name = "kagura-claude-harness", specifier = ">=0.1.1,<0.2" },
     { name = "kagura-code-reviewer", marker = "extra == 'review'" },
     { name = "kagura-memory", specifier = ">=0.30,<0.31" },
     { name = "pydantic", specifier = ">=2.7" },

@@ -8,6 +8,23 @@ While the project is in `0.x`, minor versions may carry breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- `init` command (#35): scaffolds a commented `repo.yaml` template (never
+  overwrites an existing one) and idempotently adds `repo.yaml` to `.gitignore`,
+  so a fresh checkout starts configured and the workspace/context IDs stay out
+  of git by default. `kagura-engineer init [--dir <path>]`.
+
+### Changed
+
+- `setup` (memory-mcp step) now adds the generated `.mcp.json` to `.gitignore`
+  **before** writing it — its static-token form bakes in a bearer key, so the
+  ignore rule is established first (fail-secure: a write failure can never leave
+  an un-ignored secret on disk). Reuses the new `init` scaffold helper rather
+  than duplicating the gitignore logic (#35).
+- `config`: a missing `repo.yaml` now points the user at `kagura-engineer init`
+  instead of only reporting the absence (#35).
+
 ## [0.2.1] — 2026-06-09
 
 ### Fixed
