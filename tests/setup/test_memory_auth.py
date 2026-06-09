@@ -18,15 +18,38 @@ from kagura_engineer.setup.memory_auth import (
 )
 
 
+def _full_profile(**over) -> dict:
+    """A complete OAuth credential, as `kagura auth login` would write it.
+
+    The resolver delegates to the SDK loader (issue #36), which requires the
+    full credential shape — a partial stub no longer counts as a working login
+    (that is the point: a half-written file would 401 at run time).
+    """
+    p = {
+        "server": "https://memory.kagura-ai.com",
+        "mcp_url": "https://memory.kagura-ai.com/mcp",
+        "client_id": "cid",
+        "access_token": "tok",
+        "refresh_token": "rtok",
+        "token_type": "Bearer",
+        "expires_at": "2099-01-01T00:00:00+00:00",
+        "scope": "",
+    }
+    p.update(over)
+    return p
+
+
 def _write_credentials(home: Path, profiles: dict, default_profile: str = "default") -> Path:
-    """Write a minimal `~/.kagura/credentials.json` with the given profiles."""
+    """Write a `~/.kagura/credentials.json` with the given profiles, filling
+    each profile out to the full credential shape the SDK loader requires."""
     import json
 
+    full = {name: _full_profile(**(val or {})) for name, val in profiles.items()}
     cred = home / ".kagura" / "credentials.json"
     cred.parent.mkdir(parents=True, exist_ok=True)
     cred.write_text(
         json.dumps(
-            {"version": 1, "default_profile": default_profile, "profiles": profiles}
+            {"version": 1, "default_profile": default_profile, "profiles": full}
         )
     )
     return cred

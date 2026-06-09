@@ -221,7 +221,7 @@ def run_idea(
         head_before = head_rev(wt) if phase == "implement" else None
         try:
             inv = invoke_phase(phase, issue, wt, grounding, unattended=unattended,
-                               mcp_config=cfg.memory_mcp_config)
+                               mcp_config=cfg.resolve_mcp_config(root))
         except OSError as exc:
             _log.exception("run %s phase failed to launch claude", phase)
             _record(PhaseResult(phase, RunStatus.FAIL, f"failed to launch claude: {exc}"))

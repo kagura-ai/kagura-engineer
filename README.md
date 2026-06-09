@@ -93,7 +93,7 @@ context_id: 00000000-0000-0000-0000-000000000000  # required for cloud backend �
 ollama_url: http://localhost:11434                 # optional (default shown)
 memory_backend: cloud                              # optional: cloud | local (default: cloud)
 local_memory_path: .kagura/memory.db               # optional (used only when backend=local)
-memory_mcp_config: .mcp/kagura-memory.json         # optional: attach memory MCP to headless phases
+memory_mcp_config: .mcp.json                       # optional: override the auto-discovered <repo>/.mcp.json
 review:
   models: [qwen2.5-coder:7b, haiku]               # optional (default: [])
   max_loops: 3                                      # optional (default: 3)
@@ -138,12 +138,20 @@ grounding to an offline SQLite store (`local_memory_path`, stdlib `sqlite3` — 
 API key, no network). It implements the same client Protocol; offline recall is a
 keyword-overlap match (no embeddings).
 
-**In-task memory MCP.** By default the harness *string-injects* recalled memory
-into each headless `claude -p` prompt. Set `memory_mcp_config` to a Claude Code
-MCP config (`{"mcpServers": {"kagura-memory": {…}}}`) and the run/fix phases get
-the `kagura-memory` recall/remember tools attached (`--mcp-config`, additive),
-so the model can recall *during* the task. The server's tools must be permitted
-in your Claude settings; recalled content is treated as untrusted reference.
+**In-task memory MCP.** Beyond string-injecting recalled memory into each
+headless `claude -p` prompt, the run/fix phases also attach the `kagura-memory`
+recall/remember tools (`--mcp-config`, additive) so the model can recall
+*during* the task. `kagura-engineer setup` **generates** `<repo>/.mcp.json` for
+you (no hand-authoring) via the kagura-memory SDK: with a `kagura auth login`
+profile it writes the refresh-aware **stdio** form (`kagura-mcp --profile <p>`,
+no secret baked in); with only `KAGURA_API_KEY` it writes the static-token url
+form. `run`/`review` auto-discover that `<repo>/.mcp.json`; set
+`memory_mcp_config` only to point somewhere else. By default `setup` writes the
+`.mcp.json` **only** — pass `--full` to additionally install the SDK's memory
+hooks + skills (interactive Claude Code wiring; off by default so autonomous
+runs are not flooded with per-edit `remember` calls). The server's tools must be
+permitted in your Claude settings; recalled content is treated as untrusted
+reference.
 
 ---
 

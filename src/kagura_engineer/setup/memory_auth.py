@@ -19,16 +19,19 @@ the user has authenticated for neither, so the resolver returns `NONE` and
 the caller surfaces a WARN with a hint to `export KAGURA_API_KEY=...` or
 `kagura auth login`.
 
-Like `setup.auth`, this module is deliberately side-effect free: it reads
-env and the filesystem and returns a value object, so doctor can call it
-during `--no-input` validation without a TTY. The credentials file is
-parsed with stdlib `json` (not the SDK loader) so the resolver stays a
-pure, dependency-light function over (env, home).
+Like `setup.auth`, this module reads env and the filesystem and returns a
+value object, so doctor can call it during `--no-input` validation without
+a TTY. The credentials file is parsed by the **SDK** loader
+(`kagura_memory.auth.credentials.load_credentials_file`) rather than a
+hand-rolled re-implementation (issue #36): the SDK owns the file format,
+the default-profile selection, and the malformed-file fallbacks, so
+matching it by hand only re-creates the drift footgun this module exists
+to close. (The loader coerces the real `~/.kagura` perms to 0700/0600 as a
+benign side effect when it reads a present file.)
 """
 from __future__ import annotations
 
 import enum
-import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -60,35 +63,21 @@ def _resolve_oauth_profile(home: Path) -> str | None:
     """Return the profile name a `kagura auth login` cache would activate, or
     None if the cache is absent, unreadable, malformed, or empty.
 
-    Mirrors the SDK's selection (`CredentialsFile.get_profile(None)` →
-    `default_profile`) without importing the SDK: read the file, pick the
-    `default_profile`, and confirm it actually has a profile entry.
+    Delegates to the SDK loader so our selection is the SDK's selection by
+    construction: `load_credentials_file` returns an empty `CredentialsFile`
+    for a missing/unreadable/malformed file, and `get_profile(None)` is
+    `profiles.get(default_profile)` — which is None when `default_profile`
+    names a missing entry (it never falls back to an arbitrary profile).
+    Reporting a profile the SDK would NOT select re-creates the exact
+    "doctor passes, run dies" footgun this module exists to close.
     """
-    path = _credentials_path(home)
-    try:
-        raw = path.read_text(encoding="utf-8")
-    except OSError:
+    from kagura_memory.auth.credentials import load_credentials_file
+
+    cf = load_credentials_file(_credentials_path(home))
+    if cf.get_profile() is None:
         return None
-    try:
-        data = json.loads(raw)
-    except ValueError:
-        return None
-    if not isinstance(data, dict):
-        return None
-    profiles = data.get("profiles")
-    if not isinstance(profiles, dict) or not profiles:
-        return None
-    # The SDK defaults to "default" when `default_profile` is absent.
-    key = data.get("default_profile") or "default"
-    # Match the SDK exactly: `CredentialsFile.get_profile(None)` is just
-    # `profiles.get(default_profile)`, which returns None when default_profile
-    # names a missing entry — it never falls back to an arbitrary profile.
-    # Reporting a profile the SDK would NOT select re-creates the exact
-    # "doctor passes, run dies" footgun this module exists to close, so we
-    # return None here (→ caller WARNs / NEEDS_USER) instead of guessing.
-    if key in profiles:
-        return key
-    return None
+    # The active key when get_profile(None) resolves is `default_profile`.
+    return cf.default_profile
 
 
 def resolve_memory_cloud_auth(

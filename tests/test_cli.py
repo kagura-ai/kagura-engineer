@@ -151,6 +151,24 @@ def test_setup_fix_filter_propagates(write_cfg, monkeypatch):
     assert captured.get("only") == "gh"
 
 
+def test_setup_full_propagates(write_cfg, monkeypatch):
+    # `--full` opts the memory-mcp step into installing SDK hooks + skills;
+    # default (flag absent) must stay `.mcp.json`-only (full=False).
+    captured = {}
+
+    def _spy(*a, **kw):
+        captured.update(kw)
+        return _stub_setup_report()
+
+    monkeypatch.setattr("kagura_engineer.cli.run_plan", _spy)
+    runner.invoke(app, ["setup", "--config", str(write_cfg), "--full"])
+    assert captured.get("full") is True
+
+    captured.clear()
+    runner.invoke(app, ["setup", "--config", str(write_cfg)])
+    assert captured.get("full") is False
+
+
 def test_setup_unknown_fix_is_clean_error(write_cfg, monkeypatch):
     # An unknown --fix name is a user error, not a silent no-op.
     # The CLI must catch this BEFORE calling run_plan so the user

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
+
 from ..config import Config
 from . import checks
 from .result import CheckResult, Status
@@ -29,10 +31,20 @@ _CHECKS: list[tuple[str, callable]] = [
     ("gh-issue-driven", lambda c: checks.check_gh_issue_driven()),
 ]
 
+# Cloud-only checks: appended to the plan only when the backend is the Cloud.
+# The offline SQLite backend has no MCP memory server, so the generated
+# .mcp.json check (issue #36) is meaningless for it.
+_CLOUD_ONLY_CHECKS: list[tuple[str, callable]] = [
+    ("memory-mcp", lambda c: checks.check_memory_mcp(Path.cwd())),
+]
+
 
 def run_all(cfg: Config) -> list[CheckResult]:
     results: list[CheckResult] = []
-    for name, fn in _CHECKS:
+    plan = list(_CHECKS)
+    if cfg.memory_backend == "cloud":
+        plan += _CLOUD_ONLY_CHECKS
+    for name, fn in plan:
         try:
             results.append(fn(cfg))
         except Exception as exc:  # noqa: BLE001 — see docstring above

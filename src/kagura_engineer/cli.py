@@ -103,6 +103,11 @@ def setup(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="preview all steps without executing; exit 0/1/2 on feasibility"
     ),
+    full: bool = typer.Option(
+        False, "--full",
+        help="also install memory hooks + skills into the repo (interactive Claude "
+             "Code wiring); default generates .mcp.json only",
+    ),
     json_out: bool = typer.Option(False, "--json"),
 ) -> None:
     """Resolve dependencies and bootstrap a healthy dev environment.
@@ -126,7 +131,7 @@ def setup(
         typer.echo(err, err=True)
         raise typer.Exit(code=2)
 
-    report = run_plan(cfg, no_input=no_input, dry_run=dry_run, only=fix)
+    report = run_plan(cfg, no_input=no_input, dry_run=dry_run, only=fix, full=full)
 
     if json_out:
         typer.echo(setup_to_json(report))

@@ -375,7 +375,17 @@ def test_memory_cloud_ok_reports_oauth_profile_auth(monkeypatch, tmp_path):
 
     cred = tmp_path / ".kagura" / "credentials.json"
     cred.parent.mkdir(parents=True)
-    cred.write_text(_j.dumps({"default_profile": "default", "profiles": {"default": {}}}))
+    # SDK loader requires the full credential shape (issue #36).
+    _full = {
+        "server": "https://memory.kagura-ai.com",
+        "mcp_url": "https://memory.kagura-ai.com/mcp",
+        "client_id": "cid",
+        "access_token": "tok",
+        "refresh_token": "rtok",
+        "token_type": "Bearer",
+        "expires_at": "2099-01-01T00:00:00+00:00",
+    }
+    cred.write_text(_j.dumps({"default_profile": "default", "profiles": {"default": _full}}))
     monkeypatch.setattr(
         checks.urllib.request, "urlopen", lambda *a, **k: _FakeResp({"status": "ok"})
     )
@@ -438,3 +448,65 @@ def test_check_local_memory_fail_when_parent_unwritable(tmp_path):
     blocker.write_text("x")  # a file where a dir is expected → mkdir fails
     r = checks.check_local_memory(str(blocker / "nope" / "mem.db"))
     assert r.status is Status.FAIL
+
+
+# --- check_memory_mcp (issue #36) --------------------------------------
+
+
+def _login(home, profile="default"):
+    import json as _json
+    # The resolver delegates to the SDK loader (issue #36): a profile only
+    # counts when it carries the full OAuth credential shape.
+    full = {
+        "server": "https://memory.kagura-ai.com",
+        "mcp_url": "https://memory.kagura-ai.com/mcp",
+        "client_id": "cid",
+        "access_token": "t",
+        "refresh_token": "r",
+        "token_type": "Bearer",
+        "expires_at": "2099-01-01T00:00:00+00:00",
+    }
+    cred = home / ".kagura" / "credentials.json"
+    cred.parent.mkdir(parents=True, exist_ok=True)
+    cred.write_text(_json.dumps({"default_profile": profile, "profiles": {profile: full}}))
+
+
+def test_check_memory_mcp_warns_when_absent(tmp_path):
+    from kagura_engineer.doctor import checks
+    from kagura_engineer.doctor.result import Status
+    r = checks.check_memory_mcp(tmp_path, env={"KAGURA_API_KEY": "kg"}, home=tmp_path)
+    assert r.status is Status.WARN
+    assert "setup" in (r.fix_hint or "").lower()
+    assert r.is_blocking is False  # WARN is advisory, not a run-blocker
+
+
+def test_check_memory_mcp_ok_for_stdio_with_credential(tmp_path):
+    from kagura_engineer.doctor import checks
+    from kagura_engineer.doctor.result import Status
+    from kagura_memory.setup_claude import _write_mcp_json_stdio
+    _login(tmp_path, profile="default")
+    _write_mcp_json_stdio(tmp_path, "default")
+    r = checks.check_memory_mcp(tmp_path, env={}, home=tmp_path)
+    assert r.status is Status.OK
+    assert "stdio" in r.detail.lower()
+
+
+def test_check_memory_mcp_ok_for_static_token(tmp_path):
+    from kagura_engineer.doctor import checks
+    from kagura_engineer.doctor.result import Status
+    from kagura_memory.setup_claude import _write_mcp_json
+    _write_mcp_json(tmp_path, "kg-secret", "https://memory.kagura-ai.com/mcp")
+    r = checks.check_memory_mcp(tmp_path, env={"KAGURA_API_KEY": "kg-secret"}, home=tmp_path)
+    assert r.status is Status.OK
+
+
+def test_check_memory_mcp_warns_when_config_present_but_no_credential(tmp_path):
+    # A generated stdio config whose profile credential has since gone away
+    # is stale — the proxy will 401. Flag it (WARN), don't pass silently.
+    from kagura_engineer.doctor import checks
+    from kagura_engineer.doctor.result import Status
+    from kagura_memory.setup_claude import _write_mcp_json_stdio
+    _write_mcp_json_stdio(tmp_path, "default")
+    r = checks.check_memory_mcp(tmp_path, env={}, home=tmp_path)
+    assert r.status is Status.WARN
+    assert "credential" in r.detail.lower() or "credential" in (r.fix_hint or "").lower()
