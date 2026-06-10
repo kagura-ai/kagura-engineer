@@ -112,6 +112,48 @@ def test_codex_keeps_engineer_no_mcp_warning(spy_select, caplog):
     assert any("codex" in r.message.lower() for r in caplog.records)
 
 
+# --- enable_codex_mcp policy seam (issue #68) ---------------------------------
+# "Capable but disabled by policy" is expressed as config data, not as a shim
+# flag that silently shadows the library capability. Default off preserves the
+# no-in-task-MCP behavior (regression-tested above); flag on forwards the full
+# MCP wiring to codex through the handle.
+
+
+def test_codex_enable_codex_mcp_flag_enables_mcp(spy_select):
+    call = select_brain(_cfg(brain_backend="codex", enable_codex_mcp=True), env={})
+    assert call.backend == "codex"
+    assert call.supports_mcp is True
+    assert call.mcp_enabled("/x/.mcp.json") is True
+    call.invoke("hi", cwd=None, timeout=1, mcp_config="/x/.mcp.json")
+    assert spy_select["handle"].invoked["mcp_config"] == "/x/.mcp.json"
+    assert spy_select["handle"].invoked["allowed_tools"] == MEMORY_TOOLS
+
+
+def test_codex_enable_codex_mcp_replaces_out_of_band_warning(spy_select, caplog):
+    # Flag on: the "grounds out-of-band only" warning would be wrong, so it is
+    # replaced by an opt-in signal that flag-on grounding is not smoke-verified.
+    with caplog.at_level(logging.WARNING):
+        select_brain(_cfg(brain_backend="codex", enable_codex_mcp=True), env={})
+    assert not any("out-of-band" in r.message for r in caplog.records)
+    assert any("enable_codex_mcp" in r.message for r in caplog.records)
+
+
+def test_enable_codex_mcp_defaults_false_and_claude_unaffected(spy_select):
+    assert _cfg().enable_codex_mcp is False
+    # The flag is codex-scoped — claude is MCP-on with or without it.
+    call = select_brain(_cfg(enable_codex_mcp=True), env={})
+    assert call.backend == "claude"
+    assert call.supports_mcp is True
+
+
+def test_real_handle_codex_flag_on_forwards_mcp_to_adapter(monkeypatch):
+    cap = _capture_adapter(monkeypatch, "codex")
+    call = select_brain(_cfg(brain_backend="codex", enable_codex_mcp=True), env={})
+    call.invoke("hi", cwd=None, timeout=5, mcp_config="/x/.mcp.json")
+    assert cap["mcp_config"] == "/x/.mcp.json"
+    assert tuple(cap["allowed_tools"]) == MEMORY_TOOLS
+
+
 # --- real-BrainHandle contract guard (NOT spy_select) -------------------------
 # The tests above fake `kagura_brain.select`, so they cannot catch the shim
 # drifting from the REAL handle's signature. These drive select_brain through the
