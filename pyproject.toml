@@ -45,7 +45,7 @@ dependencies = [
     # invoke()): subscription auth + the stale-ANTHROPIC_API_KEY strip (#34),
     # shared across harnesses. Renamed from kagura-claude-harness; now also
     # carries codex/ollama adapters (we use the claude adapter here).
-    "kagura-brain>=0.1.0,<0.2",
+    "kagura-brain>=0.2.0,<0.3",
 ]
 
 [project.optional-dependencies]

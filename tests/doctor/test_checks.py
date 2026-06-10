@@ -412,6 +412,13 @@ def test_memory_cloud_http_error_without_credential_guides_auth(monkeypatch, tmp
     assert "KAGURA_API_KEY" in r.fix_hint
 
 
+def test_check_codex_fails_when_absent(monkeypatch):
+    monkeypatch.setattr(checks.shutil, "which", lambda name: None)
+    res = checks.check_codex()
+    assert res.name == "codex"
+    assert res.status is Status.FAIL
+
+
 def test_check_gh_issue_driven_ok_when_plugin_present(tmp_path, monkeypatch):
     from kagura_engineer.doctor import checks
     from kagura_engineer.doctor.result import Status

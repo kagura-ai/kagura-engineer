@@ -4,7 +4,43 @@ from kagura_brain.core import BrainResult
 
 from kagura_engineer.mcp import MEMORY_TOOLS
 from kagura_engineer.run import workflow
-from kagura_engineer.run.workflow import PhaseInvocation
+from kagura_engineer.run.brain_select import BrainCall
+from kagura_engineer.run.workflow import PhaseInvocation, invoke_phase
+
+
+def _fake_call(records, *, supports_mcp=True):
+    def _invoke(prompt, **kwargs):
+        records.append(kwargs)
+        class _R:
+            returncode = 0
+            stdout = "KAGURA_VERDICT=green"
+            stderr = ""
+            timed_out = False
+            def detail(self): return ""
+        return _R()
+    return BrainCall("fake", _invoke, supports_mcp=supports_mcp)
+
+
+def test_invoke_phase_uses_the_supplied_brain_call(tmp_path):
+    records: list[dict] = []
+    call = _fake_call(records, supports_mcp=True)
+    inv = invoke_phase(
+        "implement", 7, tmp_path, ["grounding line"],
+        mcp_config="/x/.mcp.json", brain_call=call,
+    )
+    assert inv.returncode == 0
+    assert records and records[0]["mcp_config"] == "/x/.mcp.json"
+
+
+def test_invoke_phase_codex_call_gets_no_mcp_kwargs(tmp_path):
+    records: list[dict] = []
+    call = _fake_call(records, supports_mcp=False)
+    invoke_phase(
+        "implement", 7, tmp_path, ["g"],
+        mcp_config="/x/.mcp.json", brain_call=call,
+    )
+    assert "mcp_config" not in records[0]
+    assert "allowed_tools" not in records[0]
 
 
 def _fake_brain(stdout="", stderr="", returncode=0, timed_out=False, capture=None):
@@ -20,6 +56,23 @@ def _fake_brain(stdout="", stderr="", returncode=0, timed_out=False, capture=Non
         return BrainResult(returncode, stdout, stderr, timed_out=timed_out)
 
     return _invoke
+
+
+def _fake_brain_call(
+    stdout="", stderr="", returncode=0, timed_out=False, capture=None,
+    *, supports_mcp=True,
+):
+    """A BrainCall wrapping ``_fake_brain`` so tests can drive ``invoke_phase``.
+
+    Mirrors the old ``monkeypatch.setattr(workflow.brain, "invoke", ...)`` seam:
+    the captured kwargs are exactly what ``BrainCall.invoke`` forwards to the
+    adapter (cwd/timeout, plus mcp_config/allowed_tools when MCP is supported).
+    """
+    return BrainCall(
+        "fake",
+        _fake_brain(stdout, stderr, returncode, timed_out, capture),
+        supports_mcp=supports_mcp,
+    )
 
 
 def test_build_prompt_includes_command_grounding_and_marker_request():
@@ -163,22 +216,16 @@ def test_parse_verdict_gate1_marker_does_not_map_pass():
     assert workflow.parse_verdict("KAGURA_VERDICT=pass\n", phase="start") == "pass"
 
 
-def test_invoke_phase_ship_marker_fail_resolves_to_red(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        workflow.brain, "invoke",
-        _fake_brain(stdout="gate2 blocked\nKAGURA_VERDICT=fail\n"),
-    )
-    assert workflow.invoke_phase("ship", 3, tmp_path, []).verdict == "red"
+def test_invoke_phase_ship_marker_fail_resolves_to_red(tmp_path):
+    call = _fake_brain_call(stdout="gate2 blocked\nKAGURA_VERDICT=fail\n")
+    assert workflow.invoke_phase("ship", 3, tmp_path, [], brain_call=call).verdict == "red"
 
 
-def test_invoke_phase_ship_native_pass_resolves_to_green(monkeypatch, tmp_path):
+def test_invoke_phase_ship_native_pass_resolves_to_green(tmp_path):
     # End-to-end: a ship phase that drops the marker but closes `## Verdict: pass`
     # must resolve to a proceed verdict, not halt.
-    monkeypatch.setattr(
-        workflow.brain, "invoke",
-        _fake_brain(stdout="gate2 done\n## Verdict: pass\n"),
-    )
-    inv = workflow.invoke_phase("ship", 3, tmp_path, [])
+    call = _fake_brain_call(stdout="gate2 done\n## Verdict: pass\n")
+    inv = workflow.invoke_phase("ship", 3, tmp_path, [], brain_call=call)
     assert inv.verdict == "green"
 
 
@@ -274,19 +321,16 @@ def test_parse_pr_url_marker_outside_tail_window_is_ignored():
     assert workflow.parse_pr_url(text) is None
 
 
-def test_invoke_phase_routes_through_harness_brain_and_parses(monkeypatch, tmp_path):
+def test_invoke_phase_routes_through_harness_brain_and_parses(tmp_path):
     # invoke_phase no longer constructs a `claude -p` argv itself — it delegates
-    # to the harness brain.invoke seam (which owns the #34 key-strip) and maps
-    # the BrainResult back onto a PhaseInvocation.
+    # to the supplied BrainCall (which owns the #34 key-strip) and maps the
+    # BrainResult back onto a PhaseInvocation.
     cap = {}
-    monkeypatch.setattr(
-        workflow.brain, "invoke",
-        _fake_brain(
-            stdout="work...\nKAGURA_VERDICT=green\nKAGURA_PR_URL=https://x/pull/1\n",
-            capture=cap,
-        ),
+    call = _fake_brain_call(
+        stdout="work...\nKAGURA_VERDICT=green\nKAGURA_PR_URL=https://x/pull/1\n",
+        capture=cap,
     )
-    inv = workflow.invoke_phase("ship", 3, tmp_path, ["g"])
+    inv = workflow.invoke_phase("ship", 3, tmp_path, ["g"], brain_call=call)
     assert isinstance(inv, PhaseInvocation)
     assert inv.verdict == "green"
     assert inv.pr_url == "https://x/pull/1"
@@ -297,35 +341,29 @@ def test_invoke_phase_routes_through_harness_brain_and_parses(monkeypatch, tmp_p
     assert tuple(cap["allowed_tools"]) == MEMORY_TOOLS
 
 
-def test_invoke_phase_nonzero_returncode_keeps_output(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        workflow.brain, "invoke", _fake_brain(returncode=1, stderr="boom"),
-    )
-    inv = workflow.invoke_phase("start", 3, tmp_path, [])
+def test_invoke_phase_nonzero_returncode_keeps_output(tmp_path):
+    call = _fake_brain_call(returncode=1, stderr="boom")
+    inv = workflow.invoke_phase("start", 3, tmp_path, [], brain_call=call)
     assert inv.returncode == 1
     assert inv.verdict is None
     assert "boom" in inv.stderr
 
 
-def test_invoke_phase_timeout_returns_marker(monkeypatch, tmp_path):
+def test_invoke_phase_timeout_returns_marker(tmp_path):
     # No output at all: the timeout label falls back to BrainResult.detail().
-    monkeypatch.setattr(
-        workflow.brain, "invoke",
-        _fake_brain(returncode=-1, timed_out=True),
-    )
-    inv = workflow.invoke_phase("start", 3, tmp_path, [])
+    call = _fake_brain_call(returncode=-1, timed_out=True)
+    inv = workflow.invoke_phase("start", 3, tmp_path, [], brain_call=call)
     assert inv.returncode == -1
     assert inv.timed_out is True
     assert inv.stderr == "timed out"
 
 
-def test_invoke_phase_timeout_preserves_partial_output(monkeypatch, tmp_path):
+def test_invoke_phase_timeout_preserves_partial_output(tmp_path):
     # detail() surfaces real stderr over the generic label; partial stdout is kept.
-    monkeypatch.setattr(
-        workflow.brain, "invoke",
-        _fake_brain(returncode=-1, stdout="partial work\n", stderr="warn", timed_out=True),
+    call = _fake_brain_call(
+        returncode=-1, stdout="partial work\n", stderr="warn", timed_out=True,
     )
-    inv = workflow.invoke_phase("start", 3, tmp_path, [])
+    inv = workflow.invoke_phase("start", 3, tmp_path, [], brain_call=call)
     assert inv.timed_out is True
     assert inv.stdout == "partial work\n"
     assert inv.stderr == "warn"
@@ -340,13 +378,10 @@ def test_build_prompt_default_has_no_unattended():
     assert "UNATTENDED" not in workflow.build_prompt("start", 1, [])
 
 
-def test_invoke_phase_forwards_unattended_into_prompt(monkeypatch, tmp_path):
+def test_invoke_phase_forwards_unattended_into_prompt(tmp_path):
     cap = {}
-    monkeypatch.setattr(
-        workflow.brain, "invoke",
-        _fake_brain(stdout="KAGURA_VERDICT=green\n", capture=cap),
-    )
-    workflow.invoke_phase("ship", 2, tmp_path, [], unattended=True)
+    call = _fake_brain_call(stdout="KAGURA_VERDICT=green\n", capture=cap)
+    workflow.invoke_phase("ship", 2, tmp_path, [], unattended=True, brain_call=call)
     assert "UNATTENDED" in cap["prompt"]
 
 
@@ -360,20 +395,17 @@ def test_build_prompt_no_mcp_note_by_default():
     assert "mcp__kagura-memory" not in workflow.build_prompt("start", 1, [])
 
 
-def test_invoke_phase_forwards_mcp_config_to_brain(monkeypatch, tmp_path):
+def test_invoke_phase_forwards_mcp_config_to_brain(tmp_path):
     cap = {}
-    monkeypatch.setattr(
-        workflow.brain, "invoke",
-        _fake_brain(stdout="KAGURA_VERDICT=green\n", capture=cap),
-    )
-    workflow.invoke_phase("ship", 2, tmp_path, [], mcp_config="/tmp/m.json")
+    call = _fake_brain_call(stdout="KAGURA_VERDICT=green\n", capture=cap)
+    workflow.invoke_phase("ship", 2, tmp_path, [], mcp_config="/tmp/m.json", brain_call=call)
     assert cap["mcp_config"] == "/tmp/m.json"
 
 
-def test_invoke_phase_no_mcp_config_by_default(monkeypatch, tmp_path):
+def test_invoke_phase_no_mcp_config_by_default(tmp_path):
     cap = {}
-    monkeypatch.setattr(workflow.brain, "invoke", _fake_brain(capture=cap))
-    workflow.invoke_phase("ship", 2, tmp_path, [])
+    call = _fake_brain_call(capture=cap)
+    workflow.invoke_phase("ship", 2, tmp_path, [], brain_call=call)
     assert cap["mcp_config"] is None
 
 

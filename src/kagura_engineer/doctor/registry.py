@@ -16,7 +16,14 @@ _WORST = {Status.OK: 0, Status.WARN: 1, Status.FAIL: 2}
 # surface the failure as a FAIL CheckResult so the user sees the full picture.
 _CHECKS: list[tuple[str, callable]] = [
     ("git", lambda c: checks.check_git()),
-    ("claude-code", lambda c: checks.check_claude_code()),
+    # The brain backend's CLI: codex when selected, claude otherwise. This
+    # occupies the same slot the unconditional claude-code check used to —
+    # ordering of every other check is unchanged.
+    ("brain-cli", lambda c: (
+        checks.check_codex()
+        if c.brain_backend == "codex"
+        else checks.check_claude_code()
+    )),
     ("gh", lambda c: checks.check_gh()),
     ("ollama", lambda c: checks.check_ollama(c.ollama_url, required=c.review.models)),
     ("haiku", lambda c: checks.check_haiku()),

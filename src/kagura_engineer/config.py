@@ -66,6 +66,16 @@ class Config(BaseModel):
     # a Cloud outage are buffered to a local WAL and replayed on the next run.
     # Default on for resilience; set false to use the bare cloud client.
     memory_failover: bool = True
+    # Brain backend (issue #51). "claude" (default) drives Claude Code; "codex"
+    # drives the Codex CLI (incl. Ollama Cloud via brain_endpoint). The default
+    # reproduces today's behaviour byte-for-byte.
+    brain_backend: Literal["claude", "codex"] = "claude"
+    # Optional caller-chosen endpoint (non-secret URL/alias only — NEVER a key):
+    #   claude -> an Anthropic-compatible gateway URL
+    #   codex  -> "ollama-cloud" (alias for Ollama Cloud) or an OpenAI-compatible URL
+    # The API key is resolved from the KAGURA_BRAIN_API_KEY env var (see
+    # run/brain_select.py), never from repo.yaml.
+    brain_endpoint: str = ""
 
     def resolve_mcp_config(self, repo_root: str | Path) -> str | None:
         """Return the Claude Code MCP config path to attach for in-task recall.

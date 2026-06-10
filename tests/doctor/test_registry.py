@@ -116,6 +116,20 @@ def test_run_all_isolates_check_exceptions(monkeypatch, valid_config):
     )
 
 
+def test_registry_checks_codex_when_backend_is_codex(valid_config):
+    cfg = valid_config.model_copy(update={"brain_backend": "codex"})
+    names = {c.name for c in registry.run_all(cfg)}
+    assert "codex" in names
+    assert "claude-code" not in names
+
+
+def test_registry_checks_claude_when_backend_is_claude(valid_config):
+    cfg = valid_config.model_copy(update={"brain_backend": "claude"})
+    names = {c.name for c in registry.run_all(cfg)}
+    assert "claude-code" in names
+    assert "codex" not in names
+
+
 def test_run_all_uses_local_memory_check_when_backend_local(monkeypatch, valid_config):
     local_cfg = valid_config.model_copy(update={"memory_backend": "local"})
     called = {"local": 0, "cloud": 0}
