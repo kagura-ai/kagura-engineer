@@ -234,3 +234,35 @@ def test_resolve_mcp_config_discovers_generated_file(tmp_path):
 def test_resolve_mcp_config_none_when_absent(tmp_path):
     cfg = _cloud_cfg()
     assert cfg.resolve_mcp_config(tmp_path) is None
+
+
+# --- brain backend selection (issue #51) -------------------------------
+
+
+def _minimal_local() -> dict:
+    # local backend needs no cloud creds — keeps these tests focused on the new fields
+    return {"profile": "p", "memory_backend": "local"}
+
+
+def test_brain_backend_defaults_to_claude_no_endpoint():
+    cfg = Config.model_validate(_minimal_local())
+    assert cfg.brain_backend == "claude"
+    assert cfg.brain_endpoint == ""
+
+
+def test_brain_backend_accepts_codex_and_endpoint():
+    cfg = Config.model_validate(
+        {**_minimal_local(), "brain_backend": "codex", "brain_endpoint": "ollama-cloud"}
+    )
+    assert cfg.brain_backend == "codex"
+    assert cfg.brain_endpoint == "ollama-cloud"
+
+
+def test_brain_backend_rejects_unknown_value():
+    with pytest.raises(Exception):  # pydantic ValidationError for the Literal
+        Config.model_validate({**_minimal_local(), "brain_backend": "gpt"})
+
+
+def test_unknown_brain_key_still_forbidden():
+    with pytest.raises(Exception):
+        Config.model_validate({**_minimal_local(), "brain_backendd": "codex"})
