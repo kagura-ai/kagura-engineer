@@ -21,10 +21,12 @@ monkeypatch them on this module.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from pathlib import Path
 
-from ..config import Config
+from ..config import Config, ConfigError
+from ..run.brain_select import select_brain
 from ..run.memory import MemoryClient, resolve_memory_client
 from . import review_pr
 from .fixer import build_fix_prompt, run_fixer
@@ -66,6 +68,13 @@ def review_fix_loop(
         )
 
     try:
+        # Resolve the brain backend ONCE up-front (issue #51): codex omits MCP
+        # tools, claude keeps them. A bad endpoint/key config is a clean FAIL.
+        try:
+            brain_call = select_brain(cfg, os.environ)
+        except ConfigError as exc:
+            return _finish(ReviewStatus.FAIL, f"backend config error: {exc}")
+
         while True:
             rep = review_pr(cfg, target, base=base, memory=mem, repo_root=root)
             iterations.append(rep)
@@ -91,9 +100,9 @@ def review_fix_loop(
             blocking = [f for f in rep.findings if f.severity.upper() in _BLOCKING_SEVERITIES]
             mcp_config = cfg.resolve_mcp_config(root)
             prompt = build_fix_prompt(rep.report_path, blocking or rep.findings,
-                                      mcp_enabled=bool(mcp_config))
+                                      mcp_enabled=brain_call.mcp_enabled(mcp_config))
             try:
-                fix = run_fixer(root, prompt, mcp_config=mcp_config)
+                fix = run_fixer(root, prompt, brain_call=brain_call, mcp_config=mcp_config)
             except OSError as exc:
                 _log.exception("review --fix could not launch claude")
                 return _finish(ReviewStatus.FAIL, f"could not launch claude for fix: {exc}")
