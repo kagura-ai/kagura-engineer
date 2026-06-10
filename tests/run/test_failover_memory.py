@@ -1,4 +1,7 @@
+import fcntl
 import json
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -240,6 +243,116 @@ def test_drain_whitespace_only_wal_is_zero(tmp_path):
     wal_path.write_text("\n\n   \n", encoding="utf-8")
     c = FailoverMemoryClient(_FakeInner(), wal_path)
     assert c.drain() == 0
+
+
+def test_drain_skips_corrupt_tail_record(tmp_path):
+    """A partial final line (crash mid-append) must not abort the whole drain:
+    valid records replay, the corrupt tail is dropped."""
+    wal_path = tmp_path / "wal.jsonl"
+    wal_path.write_text(
+        json.dumps({"seq": 1, "op": "remember", "context_id": "c",
+                    "kwargs": {"summary": "s", "content": "x",
+                               "type": "savepoint", "tags": None}}) + "\n" +
+        '{"seq": 2, "op": "rem',                       # truncated mid-write
+        encoding="utf-8",
+    )
+    inner = _FakeInner()
+    c = FailoverMemoryClient(inner, wal_path)
+
+    replayed = c.drain()                               # must not raise
+
+    assert replayed == 1
+    assert ("remember", "s") in inner.calls
+    assert _wal_records(wal_path) == []                # corrupt tail not retained
+
+
+def _set_state_record(seq, key):
+    return json.dumps({"seq": seq, "op": "set_state", "context_id": "c",
+                       "kwargs": {"key": key, "value": {"v": seq}}})
+
+
+def test_drain_holds_exclusive_lock_across_replay(tmp_path):
+    """The sidecar <wal>.lock must be held (LOCK_EX) for the whole
+    read→replay→write, so a probe from inside replay cannot acquire it."""
+    wal_path = tmp_path / "wal.jsonl"
+    wal_path.write_text(_set_state_record(1, "k1") + "\n", encoding="utf-8")
+    probe = {}
+
+    class _Probing(_FakeInner):
+        def set_state(self, context_id, key, value):
+            lock_path = wal_path.with_name(wal_path.name + ".lock")
+            with open(lock_path, "w", encoding="utf-8") as f:
+                try:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    probe["acquired"] = True
+                except BlockingIOError:
+                    probe["acquired"] = False
+
+    c = FailoverMemoryClient(_Probing(), wal_path)
+    assert c.drain() == 1
+    assert probe["acquired"] is False
+
+
+class _BlockingInner(_FakeInner):
+    """Inner whose set_state parks on `release` so a test can hold a drain
+    mid-replay while racing another WAL user against it."""
+
+    def __init__(self, in_replay: threading.Event, release: threading.Event):
+        super().__init__()
+        self._in_replay = in_replay
+        self._release = release
+
+    def set_state(self, context_id, key, value):
+        self.calls.append(("set_state", key))
+        self._in_replay.set()
+        assert self._release.wait(timeout=5)
+
+
+def test_concurrent_drains_do_not_duplicate_replay(tmp_path):
+    """Two racing drains must replay each WAL record exactly once: the second
+    drain waits for the lock, then sees the already-emptied WAL."""
+    wal_path = tmp_path / "wal.jsonl"
+    wal_path.write_text(_set_state_record(1, "k1") + "\n" +
+                        _set_state_record(2, "k2") + "\n", encoding="utf-8")
+    in_replay, release = threading.Event(), threading.Event()
+    inner = _BlockingInner(in_replay, release)
+    t1 = threading.Thread(target=FailoverMemoryClient(inner, wal_path).drain)
+    t2 = threading.Thread(target=FailoverMemoryClient(inner, wal_path).drain)
+
+    t1.start()
+    assert in_replay.wait(timeout=5)                   # t1 is mid-replay
+    t2.start()
+    time.sleep(0.3)                # unlocked drain would read the WAL here
+    release.set()
+    t1.join(timeout=5); t2.join(timeout=5)
+
+    keys = [k for (m, k) in inner.calls if m == "set_state"]
+    assert sorted(keys) == ["k1", "k2"]                # no duplicates
+    assert _wal_records(wal_path) == []
+
+
+def test_append_during_drain_is_not_lost(tmp_path):
+    """A buffered write racing a drain must survive: drain's WAL rewrite may
+    not clobber a record appended by another client."""
+    wal_path = tmp_path / "wal.jsonl"
+    wal_path.write_text(_set_state_record(1, "k1") + "\n", encoding="utf-8")
+    in_replay, release = threading.Event(), threading.Event()
+    draining = FailoverMemoryClient(_BlockingInner(in_replay, release), wal_path)
+    failing = _FakeInner(); failing.fail_writes = True
+    buffering = FailoverMemoryClient(failing, wal_path)
+
+    t1 = threading.Thread(target=draining.drain)
+    t1.start()
+    assert in_replay.wait(timeout=5)                   # drain is mid-replay
+    t2 = threading.Thread(
+        target=lambda: buffering.set_state("ctx", "buffered", {"v": 1}))
+    t2.start()
+    time.sleep(0.3)                # unlocked _append would write here
+    release.set()
+    t1.join(timeout=5); t2.join(timeout=5)
+
+    recs = _wal_records(wal_path)
+    assert [r["kwargs"]["key"] for r in recs] == ["buffered"]
 
 
 def _cfg(**over):
