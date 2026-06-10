@@ -35,7 +35,7 @@ from .gate import evaluate
 from .memory import MemoryClient, resolve_memory_client
 from .result import STATUS_ICON, PhaseResult, RunReport, RunStatus
 from .worktree import WorktreeError, ensure_worktree
-from .workflow import head_rev, invoke_phase, persist_phase_stdout
+from .workflow import head_rev, invoke_phase, lookup_pr_url, persist_phase_stdout
 
 _log = logging.getLogger(__name__)
 
@@ -323,13 +323,31 @@ def run_idea(
         # `pr_url`) so a stray URL from an earlier phase can't mask a ship that
         # produced none, and FAIL if it's missing.
         if phase == "ship" and not inv.pr_url:
+            # issue #64: before declaring the false success below, cross-check
+            # GitHub directly — the dogfooded false-NEGATIVE was a ship that
+            # pushed and opened a healthy PR (ready, CI green) but dropped both
+            # trailing markers, so pr_url parsed None and this guard halted a
+            # whole `goal` milestone. An OPEN/MERGED PR on the worktree's branch
+            # is ground truth that ship reached a PR; nothing found leaves the
+            # fail-secure #18 guard exactly as strict as before.
+            recovered = lookup_pr_url(wt)
+            if recovered:
+                pr_url = recovered
+                _record(PhaseResult(
+                    phase, RunStatus.OK,
+                    "ship ok (PR URL marker dropped; verified "
+                    f"{recovered} on GitHub)",
+                    verdict=decision.verdict,
+                ))
+                continue
             # issue #38: this is the silent failure mode — ship went green yet
             # skipped push / `gh pr create`, and `run --json` ate the child's
             # reasoning. Persist that captured stdout to the worktree so the skip
             # is diagnosable without a re-run, and point the operator at it.
             detail = (
                 "ship reported green but produced no PR URL — the branch was not "
-                "pushed or no PR was opened, so the run did not reach a PR"
+                "pushed or no PR was opened (and no open PR exists for the "
+                "worktree branch on GitHub), so the run did not reach a PR"
             )
             log_path = persist_phase_stdout(wt, inv)
             if log_path is not None:

@@ -459,6 +459,113 @@ def test_build_prompt_ship_still_invokes_slash_command():
     assert "/gh-issue-driven:ship 2" in workflow.build_prompt("ship", 2, [])
 
 
+# --- issue #64: verify the PR directly when ship drops the URL marker ---------
+# The dogfooded false-negative: ship genuinely pushed and opened a healthy PR
+# (ready, CI green) but the transcript closed with the reviewer's
+# `## Verdict: green` line and dropped BOTH trailing markers, so pr_url parsed
+# None and the #18 guard failed the run — halting `goal` mid-milestone.
+# `lookup_pr_url` asks `gh` for the PR bound to the worktree's current branch so
+# the orchestrator can cross-check GitHub before declaring the false success.
+
+
+def _fake_gh(monkeypatch, *, stdout="", returncode=0, exc=None, capture=None):
+    def _run(argv, **kw):
+        if capture is not None:
+            capture["argv"] = argv
+            capture.update(kw)
+        if exc is not None:
+            raise exc
+        return subprocess.CompletedProcess(argv, returncode, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(workflow.subprocess, "run", _run)
+
+
+def test_lookup_pr_url_returns_url_of_open_pr(monkeypatch, tmp_path):
+    cap = {}
+    _fake_gh(
+        monkeypatch, capture=cap,
+        stdout='{"url": "https://github.com/o/r/pull/19", "state": "OPEN"}',
+    )
+    assert workflow.lookup_pr_url(tmp_path) == "https://github.com/o/r/pull/19"
+    assert cap["argv"][:3] == ["gh", "pr", "view"]  # branch-bound lookup
+    assert cap["cwd"] == str(tmp_path)              # resolved in the worktree
+
+
+def test_lookup_pr_url_accepts_merged_pr(monkeypatch, tmp_path):
+    # A merged PR still proves the run reached a PR (idempotent re-runs).
+    _fake_gh(
+        monkeypatch,
+        stdout='{"url": "https://github.com/o/r/pull/19", "state": "MERGED"}',
+    )
+    assert workflow.lookup_pr_url(tmp_path) == "https://github.com/o/r/pull/19"
+
+
+def test_lookup_pr_url_rejects_closed_unmerged_pr(monkeypatch, tmp_path):
+    # A CLOSED-unmerged PR is not a shipped PR — must not mask the #18 FAIL.
+    _fake_gh(
+        monkeypatch,
+        stdout='{"url": "https://github.com/o/r/pull/19", "state": "CLOSED"}',
+    )
+    assert workflow.lookup_pr_url(tmp_path) is None
+
+
+def test_lookup_pr_url_none_when_no_pr_for_branch(monkeypatch, tmp_path):
+    # `gh pr view` exits non-zero when the branch has no PR.
+    _fake_gh(monkeypatch, returncode=1)
+    assert workflow.lookup_pr_url(tmp_path) is None
+
+
+def test_lookup_pr_url_none_when_gh_unavailable(monkeypatch, tmp_path):
+    # Best-effort: gh missing / timing out degrades to None (→ #18 FAIL path),
+    # never an exception.
+    _fake_gh(monkeypatch, exc=OSError("gh not found"))
+    assert workflow.lookup_pr_url(tmp_path) is None
+    _fake_gh(monkeypatch, exc=subprocess.TimeoutExpired("gh", 30))
+    assert workflow.lookup_pr_url(tmp_path) is None
+
+
+def test_lookup_pr_url_none_on_unparseable_output(monkeypatch, tmp_path):
+    _fake_gh(monkeypatch, stdout="not json")
+    assert workflow.lookup_pr_url(tmp_path) is None
+
+
+def test_lookup_pr_url_none_on_non_string_state(monkeypatch, tmp_path):
+    # Never-raise contract: a nonconforming state shape (unhashable list) must
+    # degrade to None, not TypeError out of the frozenset membership test.
+    _fake_gh(
+        monkeypatch,
+        stdout='{"url": "https://github.com/o/r/pull/19", "state": ["OPEN"]}',
+    )
+    assert workflow.lookup_pr_url(tmp_path) is None
+
+
+def test_lookup_pr_url_none_on_undecodable_output(monkeypatch, tmp_path):
+    # Never-raise contract: `subprocess.run(text=True)` decodes stdout strictly,
+    # so non-UTF-8 bytes raise UnicodeDecodeError (a ValueError, NOT a
+    # SubprocessError) — it must degrade to None, not escape and crash the
+    # #18 ship guard.
+    _fake_gh(
+        monkeypatch,
+        exc=UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"),
+    )
+    assert workflow.lookup_pr_url(tmp_path) is None
+
+
+# --- issue #64 (secondary): PR bodies must auto-close the issue ----------------
+
+
+def test_build_prompt_ship_requires_closes_link():
+    # A PR body without `Closes #<n>` does not auto-close the issue on merge
+    # (#14 stayed OPEN after its PR merged) — the ship prompt must demand it.
+    assert "Closes #2" in workflow.build_prompt("ship", 2, [])
+
+
+def test_build_prompt_closes_link_only_on_ship():
+    # The PR is created in ship; start/implement prompts stay unchanged.
+    assert "Closes #" not in workflow.build_prompt("start", 2, [])
+    assert "Closes #" not in workflow.build_prompt("implement", 2, [])
+
+
 def test_head_rev_none_for_non_git_dir(tmp_path):
     # Best-effort: a non-git path returns None rather than raising, so the
     # implement empty-commit check degrades to "skip" instead of crashing.
