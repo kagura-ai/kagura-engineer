@@ -241,6 +241,19 @@ def persist_phase_stdout(worktree: Path, inv: PhaseInvocation) -> Path | None:
     return out
 
 
+def _tail_marker_pairs(text: str) -> tuple[str, list[tuple[str, str]]]:
+    """The marker-scan window and the contract-shaped pairs inside it.
+
+    Single source of the issue-#54 anchoring for BOTH parsers below — verdict
+    and PR-URL extraction must honour the identical tail + pair-first contract,
+    so the window/pair semantics live here rather than being duplicated (a
+    hardening change applied to one parser but missed in the other would
+    silently diverge the two).
+    """
+    tail = (text or "")[-_MARKER_TAIL_CHARS:]
+    return tail, _MARKER_PAIR_RE.findall(tail)
+
+
 def parse_verdict(text: str, phase: str | None = None) -> str | None:
     # The ship phase speaks gate2's `pass|fail` vocabulary (issue #3): normalise
     # pass→green / fail→red on BOTH the primary marker and the secondary native
@@ -255,8 +268,7 @@ def parse_verdict(text: str, phase: str | None = None) -> str | None:
     # Markers are tail-anchored and pair-first (issue #54, rationale at the
     # regex definitions): only the trailing window is scanned, and within it the
     # contract-shaped VERDICT+PR_URL pair beats any echoed lone marker.
-    tail = (text or "")[-_MARKER_TAIL_CHARS:]
-    pairs = _MARKER_PAIR_RE.findall(tail)
+    tail, pairs = _tail_marker_pairs(text)
     if pairs:
         return normalise(pairs[-1][0].lower())
     matches = _VERDICT_RE.findall(tail)
@@ -273,8 +285,7 @@ def parse_pr_url(text: str) -> str | None:
     # Same tail + pair-first anchoring as parse_verdict (issue #54): the URL in
     # the genuine trailing pair wins over a later echoed lone URL, and a `-`
     # there stays None rather than letting an echo fabricate a shipped PR.
-    tail = (text or "")[-_MARKER_TAIL_CHARS:]
-    pairs = _MARKER_PAIR_RE.findall(tail)
+    tail, pairs = _tail_marker_pairs(text)
     if pairs:
         url = pairs[-1][1]
     else:
