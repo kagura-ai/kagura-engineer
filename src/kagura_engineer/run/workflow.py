@@ -278,7 +278,13 @@ def lookup_pr_url(worktree: Path) -> str | None:
         data = json.loads(proc.stdout)
     except ValueError:
         return None
-    if not isinstance(data, dict) or data.get("state") not in _PR_LOOKUP_STATES:
+    if not isinstance(data, dict):
+        return None
+    state = data.get("state")
+    # A non-string state (nonconforming gh output) must degrade to None, not
+    # raise: an unhashable value would TypeError out of the frozenset test and
+    # break the never-raise contract right at the ship guard.
+    if not isinstance(state, str) or state not in _PR_LOOKUP_STATES:
         return None
     url = data.get("url")
     return url if isinstance(url, str) and url else None

@@ -529,6 +529,16 @@ def test_lookup_pr_url_none_on_unparseable_output(monkeypatch, tmp_path):
     assert workflow.lookup_pr_url(tmp_path) is None
 
 
+def test_lookup_pr_url_none_on_non_string_state(monkeypatch, tmp_path):
+    # Never-raise contract: a nonconforming state shape (unhashable list) must
+    # degrade to None, not TypeError out of the frozenset membership test.
+    _fake_gh(
+        monkeypatch,
+        stdout='{"url": "https://github.com/o/r/pull/19", "state": ["OPEN"]}',
+    )
+    assert workflow.lookup_pr_url(tmp_path) is None
+
+
 # --- issue #64 (secondary): PR bodies must auto-close the issue ----------------
 
 
