@@ -86,6 +86,31 @@ def check_claude_code() -> CheckResult:
     )
 
 
+def check_codex() -> CheckResult:
+    if shutil.which("codex") is None:
+        return CheckResult(
+            "codex",
+            Status.FAIL,
+            "codex not found on PATH",
+            "install the Codex CLI and re-run doctor, or set brain_backend=claude",
+        )
+    try:
+        proc = _run(["codex", "--version"])
+    except (OSError, subprocess.SubprocessError) as exc:
+        return CheckResult(
+            "codex", Status.FAIL, f"codex invocation failed: {exc}", None
+        )
+    if proc.returncode != 0:
+        return CheckResult(
+            "codex",
+            Status.FAIL,
+            f"`codex --version` exited {proc.returncode}",
+            "reinstall the Codex CLI",
+        )
+    version = proc.stdout.strip() or "unknown"
+    return CheckResult("codex", Status.OK, version)
+
+
 def check_gh() -> CheckResult:
     if shutil.which("gh") is None:
         return CheckResult(
