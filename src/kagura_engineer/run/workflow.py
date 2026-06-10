@@ -270,7 +270,11 @@ def lookup_pr_url(worktree: Path) -> str | None:
             cwd=str(worktree), capture_output=True, text=True,
             timeout=_PR_LOOKUP_TIMEOUT_S,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
+        # UnicodeDecodeError: `text=True` decodes stdout with the strict codec,
+        # so non-UTF-8 bytes raise here — a ValueError subclass, NOT a
+        # SubprocessError. It must degrade to None like every other failure or
+        # it escapes the never-raise contract and crashes the #18 ship guard.
         return None
     if proc.returncode != 0:
         return None

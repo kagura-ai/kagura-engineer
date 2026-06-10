@@ -539,6 +539,18 @@ def test_lookup_pr_url_none_on_non_string_state(monkeypatch, tmp_path):
     assert workflow.lookup_pr_url(tmp_path) is None
 
 
+def test_lookup_pr_url_none_on_undecodable_output(monkeypatch, tmp_path):
+    # Never-raise contract: `subprocess.run(text=True)` decodes stdout strictly,
+    # so non-UTF-8 bytes raise UnicodeDecodeError (a ValueError, NOT a
+    # SubprocessError) — it must degrade to None, not escape and crash the
+    # #18 ship guard.
+    _fake_gh(
+        monkeypatch,
+        exc=UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"),
+    )
+    assert workflow.lookup_pr_url(tmp_path) is None
+
+
 # --- issue #64 (secondary): PR bodies must auto-close the issue ----------------
 
 
