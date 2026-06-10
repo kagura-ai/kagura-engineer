@@ -1,3 +1,5 @@
+import stat
+
 from kagura_engineer.run.local_memory import LocalMemoryClient
 from kagura_engineer.run.memory import MemoryClient
 
@@ -10,6 +12,15 @@ def _client(tmp_path):
 
 def test_satisfies_protocol(tmp_path):
     assert isinstance(_client(tmp_path), MemoryClient)
+
+
+def test_db_file_and_dir_are_private(tmp_path, permissive_umask):
+    # Issue #53: the offline DB holds memory payloads — it must never be
+    # world-readable, regardless of umask.
+    db_path = tmp_path / "db-dir" / "mem.db"
+    LocalMemoryClient(str(db_path))
+    assert stat.S_IMODE(db_path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(db_path.parent.stat().st_mode) == 0o700
 
 
 def test_remember_returns_distinct_ids(tmp_path):

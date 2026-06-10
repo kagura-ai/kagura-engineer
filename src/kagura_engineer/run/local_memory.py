@@ -15,6 +15,7 @@ feature). Rich graph/feedback/Sleep features stay Cloud-only (Plan 5+).
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -47,8 +48,12 @@ class LocalMemoryClient:
 
     def __init__(self, db_path: str) -> None:
         self._path = Path(db_path)
-        self._path.parent.mkdir(parents=True, exist_ok=True)
+        # The DB carries memory payloads — keep dir and file owner-only
+        # regardless of umask (#53). sqlite sidecars (-wal/-journal) inherit
+        # the DB file's permissions, so chmod-ing the DB covers them too.
+        self._path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         self._conn = sqlite3.connect(str(self._path))
+        os.chmod(self._path, 0o600)
         # Wait (not error) if another single-run process holds the write lock.
         self._conn.execute("PRAGMA busy_timeout = 5000")
         self._conn.executescript(_SCHEMA)
