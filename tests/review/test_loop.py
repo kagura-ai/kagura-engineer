@@ -135,6 +135,22 @@ def test_owned_memory_client_closed_on_every_exit(monkeypatch, tmp_path, statuse
     assert mem.closed == 1
 
 
+def test_owned_memory_client_closed_when_loop_raises(monkeypatch, tmp_path):
+    # exceptions that propagate out of the loop (review infra crash, non-OSError
+    # fixer failure) must still close the owned client — try/finally, not just
+    # the return paths.
+    mem = _ClosableMem()
+    monkeypatch.setattr(loop, "resolve_memory_client", lambda cfg: mem, raising=True)
+
+    def _crash(cfg, target, **kw):
+        raise RuntimeError("review infra blew up")
+
+    monkeypatch.setattr(loop, "review_pr", _crash, raising=True)
+    with pytest.raises(RuntimeError, match="review infra blew up"):
+        review_fix_loop(_cfg(), "HEAD", base="main", repo_root=tmp_path)
+    assert mem.closed == 1
+
+
 def test_injected_memory_client_not_closed(monkeypatch, tmp_path):
     _seq_review(monkeypatch, [ReviewStatus.OK])
     _ok_fixer(monkeypatch)

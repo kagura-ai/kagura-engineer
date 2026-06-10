@@ -48,7 +48,8 @@ def review_fix_loop(
     # issue #56 (same deal as run_idea / issue #14): a cloud client holds a
     # persistent event loop + httpx client that hangs the process at exit if
     # never closed. We close ONLY a client we created — an injected one is the
-    # caller's to own. Every exit path returns via `_finish`.
+    # caller's to own. The try/finally also covers exceptions that propagate
+    # out of the loop (review_pr infra errors, non-OSError fixer failures).
     owns_mem = memory is None
     root = repo_root if repo_root is not None else Path.cwd()
     budget = cfg.review.max_loops if max_loops is None else max_loops
@@ -58,49 +59,51 @@ def review_fix_loop(
     attempts = 0
 
     def _finish(status: ReviewStatus, detail: str, resume_hint: str | None = None) -> ReviewLoopReport:
-        if owns_mem and hasattr(mem, "close"):
-            try:
-                mem.close()
-            except Exception:  # noqa: BLE001 — teardown is best-effort
-                _log.exception("review memory client close failed (non-fatal)")
         return ReviewLoopReport(
             target=target, base=base, iterations=iterations, fixes_attempted=attempts,
             status=status, detail=detail, resume_hint=resume_hint,
             duration_s=time.monotonic() - started,
         )
 
-    while True:
-        rep = review_pr(cfg, target, base=base, memory=mem, repo_root=root)
-        iterations.append(rep)
+    try:
+        while True:
+            rep = review_pr(cfg, target, base=base, memory=mem, repo_root=root)
+            iterations.append(rep)
 
-        if rep.status is ReviewStatus.OK:
-            note = f" after {attempts} fix(es)" if attempts else ""
-            return _finish(ReviewStatus.OK, f"clean ({rep.verdict}){note}")
-        if rep.status is ReviewStatus.FAIL:
-            # could not review — never fix on untrusted findings
-            return _finish(ReviewStatus.FAIL, f"could not review: {rep.detail}")
+            if rep.status is ReviewStatus.OK:
+                note = f" after {attempts} fix(es)" if attempts else ""
+                return _finish(ReviewStatus.OK, f"clean ({rep.verdict}){note}")
+            if rep.status is ReviewStatus.FAIL:
+                # could not review — never fix on untrusted findings
+                return _finish(ReviewStatus.FAIL, f"could not review: {rep.detail}")
 
-        # rep.status is BLOCKED (red verdict)
-        if attempts >= budget:
-            return _finish(
-                ReviewStatus.BLOCKED,
-                f"still red after {attempts} fix attempt(s)",
-                resume_hint=f"review {rep.report_path or '.kagura/review.json'} and fix "
-                            f"manually, then re-run `kagura-engineer review {target}`",
-            )
+            # rep.status is BLOCKED (red verdict)
+            if attempts >= budget:
+                return _finish(
+                    ReviewStatus.BLOCKED,
+                    f"still red after {attempts} fix attempt(s)",
+                    resume_hint=f"review {rep.report_path or '.kagura/review.json'} and fix "
+                                f"manually, then re-run `kagura-engineer review {target}`",
+                )
 
-        # Only the genuinely-blocking findings drive the fix; the full report
-        # (report_path) still carries the rest for the actor to read if needed.
-        blocking = [f for f in rep.findings if f.severity.upper() in _BLOCKING_SEVERITIES]
-        mcp_config = cfg.resolve_mcp_config(root)
-        prompt = build_fix_prompt(rep.report_path, blocking or rep.findings,
-                                  mcp_enabled=bool(mcp_config))
-        try:
-            fix = run_fixer(root, prompt, mcp_config=mcp_config)
-        except OSError as exc:
-            _log.exception("review --fix could not launch claude")
-            return _finish(ReviewStatus.FAIL, f"could not launch claude for fix: {exc}")
-        attempts += 1
-        if fix.returncode != 0:
-            tail = "timed out" if fix.timed_out else (fix.stderr or "").strip()[-200:]
-            return _finish(ReviewStatus.FAIL, f"fix attempt {attempts} failed: {tail}")
+            # Only the genuinely-blocking findings drive the fix; the full report
+            # (report_path) still carries the rest for the actor to read if needed.
+            blocking = [f for f in rep.findings if f.severity.upper() in _BLOCKING_SEVERITIES]
+            mcp_config = cfg.resolve_mcp_config(root)
+            prompt = build_fix_prompt(rep.report_path, blocking or rep.findings,
+                                      mcp_enabled=bool(mcp_config))
+            try:
+                fix = run_fixer(root, prompt, mcp_config=mcp_config)
+            except OSError as exc:
+                _log.exception("review --fix could not launch claude")
+                return _finish(ReviewStatus.FAIL, f"could not launch claude for fix: {exc}")
+            attempts += 1
+            if fix.returncode != 0:
+                tail = "timed out" if fix.timed_out else (fix.stderr or "").strip()[-200:]
+                return _finish(ReviewStatus.FAIL, f"fix attempt {attempts} failed: {tail}")
+    finally:
+        if owns_mem and hasattr(mem, "close"):
+            try:
+                mem.close()
+            except Exception:  # noqa: BLE001 — teardown is best-effort
+                _log.exception("review memory client close failed (non-fatal)")
