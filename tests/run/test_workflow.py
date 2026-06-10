@@ -1,4 +1,5 @@
 import subprocess
+from types import SimpleNamespace
 
 from kagura_brain.core import BrainResult
 
@@ -18,7 +19,7 @@ def _fake_call(records, *, supports_mcp=True):
             timed_out = False
             def detail(self): return ""
         return _R()
-    return BrainCall("fake", _invoke, supports_mcp=supports_mcp)
+    return BrainCall("fake", SimpleNamespace(invoke=_invoke), supports_mcp=supports_mcp)
 
 
 def test_invoke_phase_uses_the_supplied_brain_call(tmp_path):
@@ -70,7 +71,7 @@ def _fake_brain_call(
     """
     return BrainCall(
         "fake",
-        _fake_brain(stdout, stderr, returncode, timed_out, capture),
+        SimpleNamespace(invoke=_fake_brain(stdout, stderr, returncode, timed_out, capture)),
         supports_mcp=supports_mcp,
     )
 
