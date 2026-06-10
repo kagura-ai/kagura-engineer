@@ -132,11 +132,16 @@ class FailoverMemoryClient:
 
     def _read_records(self) -> list[dict]:
         """Parse the WAL, skipping undecodable lines (e.g. a partial tail record
-        from a crash mid-append) so one corrupt line cannot drop the whole WAL."""
+        from a crash mid-append) so one corrupt line cannot drop the whole WAL.
+        Decoding is lossy (errors="replace") for the same reason: valid records
+        are ASCII-only (json.dumps escapes non-ASCII), so replacement characters
+        can only land in already-corrupt lines, which then fail json.loads and
+        are skipped instead of raising UnicodeDecodeError for the whole file."""
         if not self._wal_path.exists():
             return []
         records: list[dict] = []
-        for line in self._wal_path.read_text(encoding="utf-8").splitlines():
+        text = self._wal_path.read_text(encoding="utf-8", errors="replace")
+        for line in text.splitlines():
             if not line.strip():
                 continue
             try:

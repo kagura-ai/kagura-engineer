@@ -266,6 +266,25 @@ def test_drain_skips_corrupt_tail_record(tmp_path):
     assert _wal_records(wal_path) == []                # corrupt tail not retained
 
 
+def test_drain_skips_invalid_utf8_record(tmp_path):
+    """A line with undecodable bytes (disk corruption, torn external write) must
+    not abort the drain: decoding is lossy per-line, valid records still replay."""
+    wal_path = tmp_path / "wal.jsonl"
+    valid = json.dumps({"seq": 1, "op": "remember", "context_id": "c",
+                        "kwargs": {"summary": "s", "content": "x",
+                                   "type": "savepoint", "tags": None}})
+    wal_path.write_bytes(valid.encode("utf-8") + b"\n" + b'{"seq": 2, \xff\xfe\n')
+
+    inner = _FakeInner()
+    c = FailoverMemoryClient(inner, wal_path)
+
+    replayed = c.drain()                               # must not raise
+
+    assert replayed == 1
+    assert ("remember", "s") in inner.calls
+    assert _wal_records(wal_path) == []                # corrupt line not retained
+
+
 def _set_state_record(seq, key):
     return json.dumps({"seq": seq, "op": "set_state", "context_id": "c",
                        "kwargs": {"key": key, "value": {"v": seq}}})
