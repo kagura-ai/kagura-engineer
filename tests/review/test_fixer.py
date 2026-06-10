@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from kagura_brain.core import BrainResult
 
 from kagura_engineer.mcp import MEMORY_TOOLS
@@ -17,7 +19,9 @@ def _fake_brain_call(stdout="", stderr="", returncode=0, timed_out=False, captur
             capture.update(kw)
         return BrainResult(returncode, stdout, stderr, timed_out=timed_out)
 
-    return BrainCall("fake-claude", _invoke, supports_mcp=True)
+    # The shim wraps a kagura_brain handle (invoke-only); the fake mirrors that
+    # shape with a stub exposing `.invoke`.
+    return BrainCall("fake-claude", SimpleNamespace(invoke=_invoke), supports_mcp=True)
 
 
 def _findings():
@@ -112,7 +116,7 @@ def test_run_fixer_uses_brain_call_and_omits_mcp_for_codex(tmp_path):
             timed_out = False
             def detail(self): return ""
         return _R()
-    codex_call = BrainCall("fake-codex", _invoke, supports_mcp=False)
+    codex_call = BrainCall("fake-codex", SimpleNamespace(invoke=_invoke), supports_mcp=False)
     res = run_fixer(tmp_path, "fix it", mcp_config="/x/.mcp.json", brain_call=codex_call)
     assert res.returncode == 0
     assert "mcp_config" not in records[0]

@@ -41,11 +41,12 @@ dependencies = [
     "pydantic>=2.7",
     "pyyaml>=6.0",
     "kagura-memory>=0.30,<0.31",
-    # Owns the headless CLI-agent launcher seam (the `claude` adapter's
-    # invoke()): subscription auth + the stale-ANTHROPIC_API_KEY strip (#34),
-    # shared across harnesses. Renamed from kagura-claude-harness; now also
-    # carries codex/ollama adapters (we use the claude adapter here).
-    "kagura-brain>=0.2.0,<0.3",
+    # Owns the headless CLI-agent launcher seam and the provider-neutral
+    # `select()` → `BrainHandle` selector (#63): subscription auth + the
+    # stale-ANTHROPIC_API_KEY strip (#34), shared across harnesses. `select`
+    # (the generic claude/codex dispatch we retired our own copy of) needs >=0.3;
+    # we build on 0.4's selector + BRAIN_API_KEY_ENV + fail-closed BrainHandle.
+    "kagura-brain>=0.4.0,<0.5",
 ]
 
 [project.optional-dependencies]
