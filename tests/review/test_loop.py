@@ -1,3 +1,5 @@
+import pytest
+
 from kagura_engineer.config import Config
 from kagura_engineer.review import loop
 from kagura_engineer.review.fixer import FixerResult
@@ -94,6 +96,79 @@ def test_review_fail_does_not_fix(monkeypatch, tmp_path):
     assert rep.status is ReviewStatus.FAIL
     assert rep.fixes_attempted == 0
     assert calls["fix"] == 0
+
+
+class _ClosableMem(_Mem):
+    def __init__(self):
+        self.closed = 0
+
+    def close(self):
+        self.closed += 1
+
+
+# issue #56: a client the loop creates itself must be closed on EVERY exit path,
+# or the cloud client's event loop + httpx client hang the process at exit.
+@pytest.mark.parametrize(
+    ("statuses", "fixer"),
+    [
+        ([ReviewStatus.OK], None),                                          # clean
+        ([ReviewStatus.FAIL], None),                                        # review infra FAIL
+        ([ReviewStatus.BLOCKED, ReviewStatus.BLOCKED], None),               # budget exhausted
+        ([ReviewStatus.BLOCKED], lambda r, p, **kw: FixerResult(1, "", "boom")),  # fixer FAIL
+        ([ReviewStatus.BLOCKED], "oserror"),                                # fixer not on PATH
+    ],
+)
+def test_owned_memory_client_closed_on_every_exit(monkeypatch, tmp_path, statuses, fixer):
+    mem = _ClosableMem()
+    monkeypatch.setattr(loop, "resolve_memory_client", lambda cfg: mem, raising=True)
+    _seq_review(monkeypatch, statuses)
+    if fixer == "oserror":
+        def _boom(repo, prompt, **kw):
+            raise OSError("claude: not found")
+        monkeypatch.setattr(loop, "run_fixer", _boom, raising=True)
+    elif fixer is not None:
+        monkeypatch.setattr(loop, "run_fixer", fixer, raising=True)
+    else:
+        _ok_fixer(monkeypatch)
+
+    review_fix_loop(_cfg(max_loops=1), "HEAD", base="main", repo_root=tmp_path)
+    assert mem.closed == 1
+
+
+def test_owned_memory_client_closed_when_loop_raises(monkeypatch, tmp_path):
+    # exceptions that propagate out of the loop (review infra crash, non-OSError
+    # fixer failure) must still close the owned client — try/finally, not just
+    # the return paths.
+    mem = _ClosableMem()
+    monkeypatch.setattr(loop, "resolve_memory_client", lambda cfg: mem, raising=True)
+
+    def _crash(cfg, target, **kw):
+        raise RuntimeError("review infra blew up")
+
+    monkeypatch.setattr(loop, "review_pr", _crash, raising=True)
+    with pytest.raises(RuntimeError, match="review infra blew up"):
+        review_fix_loop(_cfg(), "HEAD", base="main", repo_root=tmp_path)
+    assert mem.closed == 1
+
+
+def test_injected_memory_client_not_closed(monkeypatch, tmp_path):
+    _seq_review(monkeypatch, [ReviewStatus.OK])
+    _ok_fixer(monkeypatch)
+    mem = _ClosableMem()
+    review_fix_loop(_cfg(), "HEAD", base="main", memory=mem, repo_root=tmp_path)
+    assert mem.closed == 0
+
+
+def test_owned_memory_close_failure_is_nonfatal(monkeypatch, tmp_path):
+    class _ExplodingMem(_Mem):
+        def close(self):
+            raise RuntimeError("close blew up")
+
+    monkeypatch.setattr(loop, "resolve_memory_client", lambda cfg: _ExplodingMem(), raising=True)
+    _seq_review(monkeypatch, [ReviewStatus.OK])
+    _ok_fixer(monkeypatch)
+    rep = review_fix_loop(_cfg(), "HEAD", base="main", repo_root=tmp_path)
+    assert rep.status is ReviewStatus.OK
 
 
 def test_mcp_config_threads_to_run_fixer(monkeypatch, tmp_path):
