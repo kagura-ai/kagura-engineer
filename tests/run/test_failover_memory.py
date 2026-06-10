@@ -1,5 +1,4 @@
 import json
-import os
 import stat
 from pathlib import Path
 
@@ -168,16 +167,6 @@ def test_append_failure_preserves_no_raise(tmp_path):
     assert rid.startswith("wal:")
 
 
-@pytest.fixture
-def permissive_umask():
-    """Force the classic permissive umask (022) so the perms tests fail unless
-    the code sets modes explicitly — not because the host umask happens to be
-    strict already."""
-    old = os.umask(0o022)
-    yield
-    os.umask(old)
-
-
 def _mode(path) -> int:
     return stat.S_IMODE(Path(path).stat().st_mode)
 
@@ -191,6 +180,21 @@ def test_wal_file_and_dir_are_private(tmp_path, permissive_umask):
     c.remember("ctx", summary="secret", content="secret", type="savepoint")
     assert _mode(wal_path) == 0o600
     assert _mode(wal_path.parent) == 0o700
+
+
+def test_preexisting_wal_artifacts_are_retightened(tmp_path, permissive_umask):
+    # Upgrade path: a pre-fix version left the WAL dir/file world-readable.
+    # mkdir/os.open modes only apply at creation, so the client must chmod /
+    # fchmod existing artifacts back to owner-only on the next append.
+    wal_dir = tmp_path / "wal-dir"
+    wal_dir.mkdir(mode=0o755)
+    wal_path = wal_dir / "wal.jsonl"
+    wal_path.touch(mode=0o644)
+    inner = _FakeInner(); inner.fail_writes = True
+    c = FailoverMemoryClient(inner, wal_path)
+    c.remember("ctx", summary="secret", content="secret", type="savepoint")
+    assert _mode(wal_path) == 0o600
+    assert _mode(wal_dir) == 0o700
 
 
 def test_wal_rewrite_after_partial_drain_stays_private(tmp_path, permissive_umask):

@@ -1,7 +1,4 @@
-import os
 import stat
-
-import pytest
 
 from kagura_engineer.run.local_memory import LocalMemoryClient
 from kagura_engineer.run.memory import MemoryClient
@@ -15,14 +12,6 @@ def _client(tmp_path):
 
 def test_satisfies_protocol(tmp_path):
     assert isinstance(_client(tmp_path), MemoryClient)
-
-
-@pytest.fixture
-def permissive_umask():
-    """Force umask 022 so the perms test fails unless modes are set explicitly."""
-    old = os.umask(0o022)
-    yield
-    os.umask(old)
 
 
 def test_db_file_and_dir_are_private(tmp_path, permissive_umask):
