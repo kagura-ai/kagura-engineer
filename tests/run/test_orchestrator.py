@@ -54,6 +54,12 @@ def _patch_boundaries(monkeypatch, *, blocking=False, phases=None, worktree=None
         return phases.get(phase) or PhaseInvocation(phase, 0, "", "", "green", None)
 
     monkeypatch.setattr("kagura_engineer.run.invoke_phase", _invoke)
+    # issue #64: the ship no-PR-URL guard cross-checks GitHub via lookup_pr_url;
+    # default it to "no PR found" so no test ever shells out to real `gh`
+    # (raising=False keeps this patch inert until the seam exists).
+    monkeypatch.setattr(
+        "kagura_engineer.run.lookup_pr_url", lambda wt: None, raising=False,
+    )
 
 
 def test_status_exit_map():
@@ -624,6 +630,56 @@ def test_ship_guard_checks_ships_own_url_not_an_earlier_phase(monkeypatch):
     monkeypatch.setattr("kagura_engineer.run.head_rev", lambda wt: next(shas))
     report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
     assert report.status is RunStatus.FAIL  # NOT masked by the earlier URL
+    assert report.phases[-1].name == "ship"
+
+
+# --- issue #64: a healthy PR must not be failed on a dropped URL marker -------
+
+
+def test_ship_green_with_dropped_url_marker_recovers_pr_from_github(monkeypatch):
+    # The dogfooded false-negative: ship pushed and opened a healthy PR (ready,
+    # CI green) but the transcript closed with the reviewer's `## Verdict: green`
+    # and dropped BOTH trailing markers → pr_url=None → the #18 guard failed the
+    # run and `goal` halted mid-milestone. Before declaring that false success,
+    # the guard must cross-check GitHub: PR found → status=ok with that URL.
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "implement": PhaseInvocation("implement", 0, "", "", "green", None),
+        # ship verdict recovered via the native `## Verdict: green` fallback,
+        # but no KAGURA_PR_URL marker was emitted.
+        "ship": PhaseInvocation("ship", 0, "…\n## Verdict: green\n", "", "green", None),
+    })
+    shas = iter(["before", "after"])  # implement produced a commit
+    monkeypatch.setattr("kagura_engineer.run.head_rev", lambda wt: next(shas))
+    monkeypatch.setattr(
+        "kagura_engineer.run.lookup_pr_url",
+        lambda wt: "https://github.com/o/r/pull/19",
+    )
+    mem = _FakeMemory()
+    report = run_idea(_cfg(), 42, memory=mem, repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK
+    assert STATUS_EXIT[report.status] == 0
+    assert report.pr_url == "https://github.com/o/r/pull/19"
+    ship = next(p for p in report.phases if p.name == "ship")
+    assert ship.status is RunStatus.OK
+    assert "github" in ship.detail.lower()  # detail says the URL was recovered
+    assert any(t == "savepoint" for t, _ in mem.remembered)  # persist ran
+    assert mem.state.get("run:42", {}).get("done") is True   # resume marker set
+
+
+def test_ship_green_no_url_marker_and_no_github_pr_stays_fail(monkeypatch):
+    # The cross-check finding nothing preserves the #18 fail-secure guard: a
+    # green ship with neither a URL marker nor an actual PR is a false success.
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "implement": PhaseInvocation("implement", 0, "", "", "green", None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", None),
+    })
+    shas = iter(["before", "after"])
+    monkeypatch.setattr("kagura_engineer.run.head_rev", lambda wt: next(shas))
+    monkeypatch.setattr("kagura_engineer.run.lookup_pr_url", lambda wt: None)
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.FAIL
     assert report.phases[-1].name == "ship"
 
 

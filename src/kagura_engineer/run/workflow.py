@@ -58,14 +58,25 @@ never pushed a branch or opened a PR (a false success). A genuinely-shipped PR
 whose marker was merely dropped is the rarer case, and is recoverable: re-running
 `kagura-engineer run <issue>` resumes, and gh-issue-driven:ship is idempotent
 against an already-open PR. So the conservative FAIL is preferred over a proceed
-that might claim a PR that does not exist. Revisit (e.g. verify the PR directly)
-only if a structured PR-URL contract emerges upstream.
+that might claim a PR that does not exist.
+
+PR-existence cross-check (issue #64, the #18 "verify the PR directly" revisit).
+The rarer case happened: a ship that pushed and opened a healthy PR (ready, CI
+green) closed its transcript with the reviewer's `## Verdict: green` line and
+dropped BOTH trailing markers, so pr_url parsed None and the #18 guard failed
+the run — halting `goal` mid-milestone on a false negative. There is still no
+blessed secondary *text* contract for the PR URL, but the PR itself is directly
+verifiable: `lookup_pr_url` asks `gh` for the PR bound to the worktree's current
+branch, and the orchestrator consults it before declaring the #18 FAIL. Ground
+truth from GitHub, not transcript scraping — the fail-secure default is intact
+when no PR actually exists.
 
 Phases are separate `claude -p` calls because gh-issue-driven checkpoints
 to the branch + memory between phases, so each call resumes cleanly.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 import subprocess
@@ -189,6 +200,15 @@ def build_prompt(
         # current branch, so the flag belongs on start alone.
         flag = f" --branch={branch_override}" if (phase == "start" and branch_override) else ""
         body = f"Run the slash command `/gh-issue-driven:{phase} {issue}{flag}` to completion.\n"
+        if phase == "ship":
+            # issue #64 (secondary): a PR body without a `Closes #<n>` link does
+            # not auto-close the issue on merge, leaving it dangling open. Only
+            # ship creates the PR, so the demand stays off start/implement.
+            body += (
+                f"The pull request body MUST contain the line `Closes #{issue}` "
+                "so merging the PR auto-closes the issue; if the PR already "
+                "exists without it, edit the body to add it.\n"
+            )
         verdict_hint = "KAGURA_VERDICT=<green|yellow|red>   (the phase gate verdict)\n"
     return (
         "You are running inside an automated kagura-engineer run.\n"
@@ -220,6 +240,48 @@ def head_rev(worktree: Path) -> str | None:
     if proc.returncode != 0:
         return None
     return proc.stdout.strip() or None
+
+
+# `gh pr view` is a network call; generous but bounded so a wedged gh can't
+# stall the orchestrator (the phases themselves get 30 min, this gets 30 s).
+_PR_LOOKUP_TIMEOUT_S = 30
+# States that prove the run reached a PR: OPEN is the normal case; MERGED keeps
+# idempotent re-runs honest (the PR shipped and was already merged). A
+# CLOSED-unmerged PR is NOT a shipped PR and must not mask the #18 guard.
+_PR_LOOKUP_STATES = frozenset({"OPEN", "MERGED"})
+
+
+def lookup_pr_url(worktree: Path) -> str | None:
+    """The URL of the worktree branch's PR, straight from GitHub (issue #64).
+
+    Consulted by the orchestrator when a green ship produced no KAGURA_PR_URL
+    marker, before it declares the #18 "false success" FAIL: the dogfooded
+    false-negative was a ship that genuinely pushed and opened a healthy PR but
+    dropped both trailing markers, so the run (and the whole `goal` milestone)
+    halted on a PR that was ready and CI-green. `gh pr view` resolves the PR
+    bound to the worktree's current branch — ground truth from GitHub, not
+    transcript scraping. Best-effort: any failure (gh missing/unauthenticated,
+    no PR for the branch, timeout, unparseable output) returns None, leaving
+    the fail-secure #18 guard exactly as strict as before.
+    """
+    try:
+        proc = subprocess.run(
+            ["gh", "pr", "view", "--json", "url,state"],
+            cwd=str(worktree), capture_output=True, text=True,
+            timeout=_PR_LOOKUP_TIMEOUT_S,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        data = json.loads(proc.stdout)
+    except ValueError:
+        return None
+    if not isinstance(data, dict) or data.get("state") not in _PR_LOOKUP_STATES:
+        return None
+    url = data.get("url")
+    return url if isinstance(url, str) and url else None
 
 
 def persist_phase_stdout(worktree: Path, inv: PhaseInvocation) -> Path | None:
