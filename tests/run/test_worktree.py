@@ -15,6 +15,31 @@ def test_worktree_path_is_outside_repo_and_named_by_issue(tmp_path):
     assert repo not in p.parents  # lives in a sibling .kagura-runs tree, not inside the repo
 
 
+def test_worktree_path_label_isolates_arm(tmp_path):
+    # issue #57: an arm label gives each arm its own worktree so they never share.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    assert worktree.worktree_path(repo, 7, label="control").name == "run-7-control"
+    assert worktree.worktree_path(repo, 7, label="grounded").name == "run-7-grounded"
+    assert worktree.worktree_path(repo, 7).name == "run-7"  # default unchanged
+
+
+def test_ensure_worktree_label_creates_arm_specific_path(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    cmds = []
+
+    def _fake_run(cmd, **kw):
+        cmds.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(worktree.subprocess, "run", _fake_run)
+    out = worktree.ensure_worktree(repo, 9, label="grounded")
+    assert out == worktree.worktree_path(repo, 9, label="grounded")
+    assert out.name == "run-9-grounded"
+    assert str(out) in cmds[0]  # the arm-specific path is what git worktree add gets
+
+
 def test_ensure_worktree_resumes_when_path_exists(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()

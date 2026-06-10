@@ -8,6 +8,18 @@ While the project is in `0.x`, minor versions may carry breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- `eval` command (#57, moat lever M3): an A/B harness that measures whether memory
+  grounding measurably improves PR quality. It drives the **same** fixed issue set
+  through two arms — grounded (the normal `run` loop) and control (`run_idea` with
+  the new `ground=False` switch, no grounding injected) — and prints an A/B table
+  on objective signals already in the pipeline: PR-reached rate, gate-verdict rate,
+  and (with `--review`) review findings + re-fix-loop iterations. Emits a
+  reproducible JSON artifact and an `improved`/`regressed`/`neutral`/`inconclusive`
+  uplift verdict. `kagura-engineer eval <issue> [<issue> …] [--review] [--json]`.
+  See `docs/moat/m3-memory-uplift-eval.md`.
+
 ## [0.3.0] — 2026-06-09
 
 ### Added

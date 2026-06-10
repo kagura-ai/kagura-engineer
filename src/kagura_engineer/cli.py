@@ -8,6 +8,9 @@ import yaml
 from . import __version__
 from .config import CLOUD_REQUIRED_FIELDS, ConfigError, load_config
 from .doctor.registry import overall_status, run_all
+from .eval import ReviewFn, run_ab_eval
+from .eval.render import print_table as eval_print_table
+from .eval.render import to_json as eval_to_json
 from .doctor.render import print_table, to_json
 from .doctor.result import Status
 from .goal import GOAL_STATUS_EXIT, run_milestone
@@ -360,6 +363,92 @@ def goal(
         goal_print_table(report)
 
     raise typer.Exit(code=GOAL_STATUS_EXIT[report.status])
+
+
+# ---------------------------------------------------------------------------
+# eval (issue #57 — A/B: does memory grounding measurably improve PRs?)
+# ---------------------------------------------------------------------------
+
+
+def _pr_number(url: str | None) -> str | None:
+    """Extract a GitHub PR number from a `.../pull/N` URL (for review targeting).
+
+    Returns the number as a string (the `review` target type) or None when the URL
+    is absent / not a recognisable pull URL — in which case that arm contributes no
+    review-based signals (run-only signals still count)."""
+    if not url:
+        return None
+    parts = url.rstrip("/").split("/")
+    if len(parts) >= 2 and parts[-2] == "pull" and parts[-1].isdigit():
+        return parts[-1]
+    return None
+
+
+@app.command()
+def eval(
+    issues: list[int] = typer.Argument(
+        ..., help="the fixed issue set to run in both arms (e.g. eval 12 14 19)"
+    ),
+    config: str = _CONFIG_OPT,
+    review: bool = typer.Option(
+        False, "--review",
+        help="also run the auto-review/fix loop on each arm's PR to measure review "
+             "findings + re-fix iterations (mutates each arm's branch; slower)",
+    ),
+    json_out: bool = typer.Option(False, "--json"),
+) -> None:
+    """Measure memory-grounded uplift: run the same issues with recall ON vs OFF.
+
+    Moat lever M3. Drives each issue through two arms — grounded (normal loop) and
+    control (`run_idea` with grounding disabled) — and prints an A/B table on
+    objective signals: PR-reached rate, gate-verdict rate, and (with `--review`)
+    review findings + re-fix-loop iterations. Always exits 0 when the measurement
+    completes; the verdict (improved/regressed/neutral) is informational, not a gate.
+
+    WARNING: this launches the full run loop twice per issue and (with `--review`)
+    the fix loop on top — it mutates the repo and is expensive. Run it on a pinned,
+    disposable issue set; see docs/moat/m3-memory-uplift-eval.md for the procedure.
+    """
+    try:
+        cfg = load_config(config)
+    except ConfigError as exc:
+        typer.echo(f"eval: invalid config '{config}': {exc}", err=True)
+        raise typer.Exit(code=2)
+
+    progress = None if json_out else typer.echo
+
+    # The grounded/control arms differ by exactly one variable: run_idea's `ground`
+    # (memory READ). Memory WRITE is held constant OFF for BOTH arms via
+    # no_remember=True — deliberately, not just for the control arm: it keeps the
+    # measurement repeatable run-to-run (no savepoints/feedback accrue between
+    # eval runs) and prevents cross-arm contamination through the shared
+    # `run:<issue>` resume key (a grounded-arm done-state would otherwise make the
+    # control arm resume instead of running clean). Grounding (the IV) is read;
+    # persistence (held constant) is write — so disabling write on both arms is
+    # correct, and the grounded arm's recall is unaffected.
+    def _run_fn(issue: int, *, ground: bool):
+        # issue #57: per-arm isolation — each arm runs in its own
+        # run-<issue>-<arm> worktree/branch/resume-key (run_label), so the control
+        # arm never reuses the grounded arm's worktree/branch/PR.
+        return run_idea(cfg, issue, ground=ground, no_remember=True,
+                        unattended=True, progress=progress,
+                        run_label="grounded" if ground else "control")
+
+    review_fn: ReviewFn | None = None
+    if review:
+        def _review_fn(run_report, grounded):
+            target = _pr_number(run_report.pr_url)
+            if target is None:
+                return None
+            return review_fix_loop(cfg, target, base="main")
+        review_fn = _review_fn
+
+    report = run_ab_eval(issues, _run_fn, review_fn=review_fn, progress=progress)
+
+    if json_out:
+        typer.echo(eval_to_json(report))
+    else:
+        eval_print_table(report)
 
 
 if __name__ == "__main__":

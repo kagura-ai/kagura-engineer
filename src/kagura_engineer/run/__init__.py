@@ -91,8 +91,8 @@ def _auth_failure_hint(stdout: str, stderr: str, issue: int) -> str | None:
     return None
 
 
-def _state_key(issue: int) -> str:
-    return f"run:{issue}"
+def _state_key(issue: int, label: str | None = None) -> str:
+    return f"run:{issue}" if label is None else f"run:{issue}:{label}"
 
 
 def run_idea(
@@ -101,10 +101,29 @@ def run_idea(
     *,
     no_remember: bool = False,
     unattended: bool = False,
+    ground: bool = True,
+    run_label: str | None = None,
     memory: MemoryClient | None = None,
     repo_root: Path | None = None,
     progress: ProgressSink | None = None,
 ) -> RunReport:
+    # issue #57: `ground` is the A/B control-arm switch. ground=True (default) is
+    # the normal grounded loop — pinned + recall + graph-expanded memory injected
+    # into every phase prompt. ground=False is the control arm: the loop runs
+    # byte-for-byte identically EXCEPT no grounding is pulled or injected
+    # (load_pinned / recall / explore are skipped, and nothing is reinforced). The
+    # resume marker (get_state/set_state) is part of the loop, not grounding, so it
+    # still works — this keeps the two arms identical apart from the one variable
+    # under test: memory grounding. The eval harness (kagura_engineer.eval) runs
+    # the same issue set in both arms and compares objective PR-quality signals.
+    #
+    # `run_label` (issue #57) isolates the two arms of the SAME issue from each
+    # other: it suffixes the worktree (run-<issue>-<label>), the resume-state key
+    # (run:<issue>:<label>), and the start phase's branch (--branch=run-<issue>-
+    # <label>). Without it both arms would key off the issue number alone and the
+    # control arm would resume / build on the grounded arm's worktree+branch+PR,
+    # invalidating the A/B. None (normal runs) keeps the historical issue-only
+    # naming untouched.
     mem = memory if memory is not None else resolve_memory_client(cfg)
     # We close ONLY a client we created — an injected one is the caller's (goal /
     # tests) to own. Every exit path returns via `_finish`, so closing there
@@ -166,14 +185,19 @@ def run_idea(
     # 1. recall — grounding + resume point. Memory is core: a failure here
     # is a hard FAIL (we do not run ungrounded), surfaced cleanly not as a crash.
     recalled_ids: list[str] = []
+    recalled: list[tuple[str, str]] = []
+    grounding: list[str] = []
     try:
-        pinned = mem.load_pinned(cfg.context_id)
-        recalled = mem.recall_detailed(
-            cfg.context_id, f"issue {issue} implementation context", k=5
-        )
-        recalled_ids = [mid for mid, _ in recalled]
-        grounding = pinned + [s for _, s in recalled]
-        resumed = mem.get_state(cfg.context_id, _state_key(issue))
+        # Control arm (ground=False): pull NO grounding — skip pinned/recall
+        # entirely so the loop runs ungrounded. Resume state is read either way.
+        if ground:
+            pinned = mem.load_pinned(cfg.context_id)
+            recalled = mem.recall_detailed(
+                cfg.context_id, f"issue {issue} implementation context", k=5
+            )
+            recalled_ids = [mid for mid, _ in recalled]
+            grounding = pinned + [s for _, s in recalled]
+        resumed = mem.get_state(cfg.context_id, _state_key(issue, run_label))
     except Exception as exc:  # noqa: BLE001 — convert any SDK leak to a FAIL phase
         _log.exception("run recall phase failed")
         _record(PhaseResult("recall", RunStatus.FAIL, f"memory recall failed: {type(exc).__name__}: {exc}"))
@@ -192,7 +216,12 @@ def run_idea(
         except Exception:  # noqa: BLE001 — graph enrichment is best-effort
             _log.exception("run explore enrichment failed (non-fatal)")
 
-    detail = f"{len(grounding)} memories" + (" (resuming)" if resumed else "")
+    if ground:
+        detail = f"{len(grounding)} memories" + (" (resuming)" if resumed else "")
+    else:
+        # Control arm: name the disabled-grounding state so the report is honest
+        # about which A/B arm produced it.
+        detail = "grounding off (control arm)" + (" (resuming)" if resumed else "")
     _record(PhaseResult("recall", RunStatus.OK, detail))
 
     # 1b. cheap resume: a prior run already shipped this issue → no-op (skip
@@ -204,7 +233,7 @@ def run_idea(
 
     # 2. worktree.
     try:
-        wt = ensure_worktree(root, issue)
+        wt = ensure_worktree(root, issue, label=run_label)
     except (WorktreeError, OSError) as exc:
         _log.exception("run worktree phase failed")
         _record(PhaseResult("worktree", RunStatus.FAIL, f"worktree failed: {exc}"))
@@ -218,6 +247,12 @@ def run_idea(
         _record(PhaseResult("brain", RunStatus.FAIL, f"backend config error: {exc}"))
         return _finish(worktree=str(wt))
     pr_url = None
+    # issue #57: when this is an isolated arm, force the start phase onto an
+    # arm-specific branch (gh-issue-driven:start honours --branch=<name>) so the
+    # two arms of one issue land on distinct branches/PRs instead of colliding.
+    # Matches the worktree name for traceability. None → gh-issue-driven derives
+    # its normal typed branch (normal runs unchanged).
+    branch_override = f"run-{issue}-{run_label}" if run_label else None
     for phase in _PHASES:
         # issue #12: announce the phase BEFORE its multi-minute brain call, so a
         # stalled phase shows "▶ running" rather than a blank screen until timeout.
@@ -229,7 +264,10 @@ def run_idea(
         try:
             inv = invoke_phase(phase, issue, wt, grounding, brain_call=brain_call,
                                unattended=unattended,
-                               mcp_config=cfg.resolve_mcp_config(root))
+                               mcp_config=cfg.resolve_mcp_config(root),
+                               # only start CREATES the branch; implement/ship
+                               # follow the worktree's current branch.
+                               branch_override=branch_override if phase == "start" else None)
         except OSError as exc:
             _log.exception("run %s phase failed to launch %s", phase, brain_call.backend)
             _record(PhaseResult(
@@ -257,7 +295,7 @@ def run_idea(
         if not decision.proceed:
             # Resume marker is best-effort; a memory hiccup must not mask the halt.
             try:
-                mem.set_state(cfg.context_id, _state_key(issue), {"halted_at": phase, "verdict": decision.verdict})
+                mem.set_state(cfg.context_id, _state_key(issue, run_label), {"halted_at": phase, "verdict": decision.verdict})
             except Exception:  # noqa: BLE001
                 _log.exception("run halt set_state failed (non-fatal)")
             _record(PhaseResult(phase, RunStatus.BLOCKED, f"gate halt ({decision.verdict})", verdict=decision.verdict))
@@ -314,7 +352,7 @@ def run_idea(
                 type="savepoint",
                 tags=[f"repo:{root.name}", "run", f"issue:{issue}"],
             )
-            mem.set_state(cfg.context_id, _state_key(issue), {"done": True, "pr_url": pr_url})
+            mem.set_state(cfg.context_id, _state_key(issue, run_label), {"done": True, "pr_url": pr_url})
             _record(PhaseResult("persist", RunStatus.OK, "savepoint stored"))
         except Exception as exc:  # noqa: BLE001 — PR is done; persist is best-effort
             _log.exception("run persist phase failed (non-fatal)")

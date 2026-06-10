@@ -45,7 +45,7 @@ def _patch_boundaries(monkeypatch, *, blocking=False, phases=None, worktree=None
     """
     checks = [CheckResult("gh-issue-driven", Status.FAIL if blocking else Status.OK, "x")]
     monkeypatch.setattr("kagura_engineer.run.run_all", lambda cfg: checks)
-    monkeypatch.setattr("kagura_engineer.run.ensure_worktree", lambda root, issue, base="HEAD": worktree or Path(f"/wt/run-{issue}"))
+    monkeypatch.setattr("kagura_engineer.run.ensure_worktree", lambda root, issue, base="HEAD", label=None: worktree or Path(f"/wt/run-{issue}"))
     phases = phases or {}
 
     def _invoke(phase, issue, worktree, grounding, **kw):
@@ -174,7 +174,7 @@ def test_worktree_error_is_fail(monkeypatch):
 
     _patch_boundaries(monkeypatch, phases={})
 
-    def _boom(root, issue, base="HEAD"):
+    def _boom(root, issue, base="HEAD", label=None):
         raise WorktreeError("git worktree add failed")
 
     monkeypatch.setattr("kagura_engineer.run.ensure_worktree", _boom)
@@ -238,7 +238,7 @@ def test_unattended_threads_to_invoke_phase(monkeypatch):
     monkeypatch.setattr("kagura_engineer.run.run_all",
                         lambda cfg: [CheckResult("gh-issue-driven", Status.OK, "x")])
     monkeypatch.setattr("kagura_engineer.run.ensure_worktree",
-                        lambda root, issue, base="HEAD": Path(f"/wt/run-{issue}"))
+                        lambda root, issue, base="HEAD", label=None: Path(f"/wt/run-{issue}"))
 
     def _invoke(phase, issue, worktree, grounding, *, unattended=False, **kw):
         seen.append(unattended)
@@ -255,7 +255,7 @@ def test_mcp_config_threads_to_invoke_phase(monkeypatch):
     monkeypatch.setattr("kagura_engineer.run.run_all",
                         lambda cfg: [CheckResult("gh-issue-driven", Status.OK, "x")])
     monkeypatch.setattr("kagura_engineer.run.ensure_worktree",
-                        lambda root, issue, base="HEAD": Path(f"/wt/run-{issue}"))
+                        lambda root, issue, base="HEAD", label=None: Path(f"/wt/run-{issue}"))
 
     def _invoke(phase, issue, worktree, grounding, *, unattended=False, mcp_config=None, **kw):
         seen.append(mcp_config)
@@ -266,6 +266,36 @@ def test_mcp_config_threads_to_invoke_phase(monkeypatch):
     report = run_idea(cfg, 7, memory=_FakeMemory(), repo_root=Path("/repo"))
     assert report.status is RunStatus.OK
     assert seen == ["/tmp/m.json", "/tmp/m.json", "/tmp/m.json"]
+
+
+def test_run_label_isolates_worktree_branch_and_resume_key(monkeypatch):
+    # issue #57: run_label must isolate the arm across all three issue-keyed
+    # surfaces — worktree (label), start branch (--branch override), and the
+    # resume-state key — so the control arm cannot reuse the grounded arm's state.
+    seen_labels = []
+    seen_branch = {}
+    monkeypatch.setattr("kagura_engineer.run.run_all",
+                        lambda cfg: [CheckResult("gh-issue-driven", Status.OK, "x")])
+
+    def _ew(root, issue, base="HEAD", label=None):
+        seen_labels.append(label)
+        return Path(f"/wt/run-{issue}-{label}")
+    monkeypatch.setattr("kagura_engineer.run.ensure_worktree", _ew)
+
+    def _invoke(phase, issue, worktree, grounding, *, branch_override=None, **kw):
+        seen_branch[phase] = branch_override
+        return PhaseInvocation(phase, 0, "", "", "green", "https://x/pull/1")
+    monkeypatch.setattr("kagura_engineer.run.invoke_phase", _invoke)
+
+    mem = _FakeMemory()
+    report = run_idea(_cfg(), 7, run_label="control", memory=mem, repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK
+    assert seen_labels == ["control"]                  # worktree isolated per arm
+    assert seen_branch["start"] == "run-7-control"     # start pinned to the arm branch
+    assert seen_branch["implement"] is None            # build/ship follow current branch
+    assert seen_branch["ship"] is None
+    assert "run:7:control" in mem.state                # resume key suffixed by arm
+    assert "run:7" not in mem.state                    # never the bare issue key
 
 
 def test_resume_skips_already_shipped_issue(monkeypatch):
@@ -331,7 +361,7 @@ def test_grounding_enriched_with_explore_neighbors(monkeypatch):
     monkeypatch.setattr("kagura_engineer.run.run_all",
                         lambda cfg: [CheckResult("gh-issue-driven", Status.OK, "x")])
     monkeypatch.setattr("kagura_engineer.run.ensure_worktree",
-                        lambda root, issue, base="HEAD": Path(f"/wt/run-{issue}"))
+                        lambda root, issue, base="HEAD", label=None: Path(f"/wt/run-{issue}"))
 
     def _invoke(phase, issue, worktree, grounding, **kw):
         captured["grounding"] = list(grounding)
@@ -347,11 +377,122 @@ def test_grounding_enriched_with_explore_neighbors(monkeypatch):
     assert "RELATED neighbor" in g                       # explore enrichment
 
 
+# --- issue #57: `ground` toggle — the A/B control-arm switch ----------------
+
+
+class _CountingMemory(_FakeMemory):
+    """Records which recall/grounding calls were made, so the control arm can
+    assert NO grounding was pulled."""
+    def __init__(self):
+        super().__init__()
+        self.load_pinned_calls = 0
+        self.recall_calls = 0
+        self.explore_calls = 0
+
+    def load_pinned(self, context_id):
+        self.load_pinned_calls += 1
+        return super().load_pinned(context_id)
+
+    def recall_detailed(self, context_id, query, *, k=5):
+        self.recall_calls += 1
+        return super().recall_detailed(context_id, query, k=k)
+
+    def explore(self, context_id, memory_id, *, depth=1):
+        self.explore_calls += 1
+        return super().explore(context_id, memory_id, depth=depth)
+
+
+def test_control_arm_injects_no_grounding(monkeypatch):
+    # ground=False is the A/B control arm: the loop runs identically but NO
+    # grounding is pulled or injected — load_pinned / recall / explore are never
+    # called, and the phase prompt grounding is empty.
+    captured = {}
+    monkeypatch.setattr("kagura_engineer.run.run_all",
+                        lambda cfg: [CheckResult("gh-issue-driven", Status.OK, "x")])
+    monkeypatch.setattr("kagura_engineer.run.ensure_worktree",
+                        lambda root, issue, base="HEAD", label=None: Path(f"/wt/run-{issue}"))
+
+    def _invoke(phase, issue, worktree, grounding, **kw):
+        captured.setdefault("grounding", list(grounding))
+        return PhaseInvocation(phase, 0, "", "", "green", "https://x/pull/1")
+
+    monkeypatch.setattr("kagura_engineer.run.invoke_phase", _invoke)
+    mem = _CountingMemory()
+    mem.explore_result = [("n1", "RELATED neighbor")]
+    report = run_idea(_cfg(), 9, memory=mem, ground=False, repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK
+    assert captured["grounding"] == []        # nothing injected into the prompt
+    assert mem.load_pinned_calls == 0          # no pinned pulled
+    assert mem.recall_calls == 0               # no recall
+    assert mem.explore_calls == 0              # no graph enrichment
+
+
+def test_control_arm_skips_reinforcement(monkeypatch):
+    # With no grounding recalled, there is nothing to reinforce — feedback() must
+    # not be called even on a successful run.
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+    mem = _FakeMemory()
+    report = run_idea(_cfg(), 9, memory=mem, ground=False, repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK
+    assert mem.feedback_calls == []            # control arm reinforces nothing
+
+
+def test_control_arm_recall_phase_reports_grounding_off(monkeypatch):
+    # The recall phase still runs (resume state is read), but its detail names the
+    # disabled-grounding state so the report is honest about which arm ran.
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+    report = run_idea(_cfg(), 9, memory=_FakeMemory(), ground=False, repo_root=Path("/repo"))
+    recall_phase = next(p for p in report.phases if p.name == "recall")
+    assert "grounding off" in recall_phase.detail.lower()
+
+
+def test_grounded_arm_is_default(monkeypatch):
+    # The default (ground unset) is the grounded arm: grounding IS injected.
+    captured = {}
+    monkeypatch.setattr("kagura_engineer.run.run_all",
+                        lambda cfg: [CheckResult("gh-issue-driven", Status.OK, "x")])
+    monkeypatch.setattr("kagura_engineer.run.ensure_worktree",
+                        lambda root, issue, base="HEAD", label=None: Path(f"/wt/run-{issue}"))
+
+    def _invoke(phase, issue, worktree, grounding, **kw):
+        captured.setdefault("grounding", list(grounding))
+        return PhaseInvocation(phase, 0, "", "", "green", "https://x/pull/1")
+
+    monkeypatch.setattr("kagura_engineer.run.invoke_phase", _invoke)
+    report = run_idea(_cfg(), 9, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK
+    assert "guardrail: TDD" in captured["grounding"]  # pinned grounding injected
+
+
+def test_control_arm_still_resumes_already_shipped(monkeypatch):
+    # Resume is part of the loop, not grounding: a control-arm run of an
+    # already-shipped issue still no-ops via the resume marker.
+    monkeypatch.setattr("kagura_engineer.run.run_all",
+                        lambda cfg: [CheckResult("gh-issue-driven", Status.OK, "x")])
+
+    def _boom(*a, **k):
+        raise AssertionError("must not run worktree/act for an already-shipped issue")
+
+    monkeypatch.setattr("kagura_engineer.run.ensure_worktree", _boom)
+    monkeypatch.setattr("kagura_engineer.run.invoke_phase", _boom)
+    mem = _FakeMemory()
+    mem.state["run:7"] = {"done": True, "pr_url": "https://x/pull/7"}
+    report = run_idea(_cfg(), 7, memory=mem, ground=False, repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK
+    assert report.pr_url == "https://x/pull/7"
+
+
 def test_explore_failure_does_not_fail_recall(monkeypatch):
     monkeypatch.setattr("kagura_engineer.run.run_all",
                         lambda cfg: [CheckResult("gh-issue-driven", Status.OK, "x")])
     monkeypatch.setattr("kagura_engineer.run.ensure_worktree",
-                        lambda root, issue, base="HEAD": Path(f"/wt/run-{issue}"))
+                        lambda root, issue, base="HEAD", label=None: Path(f"/wt/run-{issue}"))
     monkeypatch.setattr("kagura_engineer.run.invoke_phase",
                         lambda phase, issue, wt, g, **kw: PhaseInvocation(phase, 0, "", "", "green", "https://x/pull/1"))
 

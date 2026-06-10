@@ -139,6 +139,7 @@ class PhaseInvocation:
 def build_prompt(
     phase: str, issue: int, grounding: list[str], *,
     unattended: bool = False, mcp_enabled: bool = False,
+    branch_override: str | None = None,
 ) -> str:
     context = "\n".join(f"- {g}" for g in grounding) or "- (no prior memory)"
     # Unattended dials the delegated skill's HITL down: it proceeds on green/
@@ -181,7 +182,13 @@ def build_prompt(
             "(green = implemented, tests green, committed)\n"
         )
     else:
-        body = f"Run the slash command `/gh-issue-driven:{phase} {issue}` to completion.\n"
+        # issue #57: the start phase honours --branch=<name> (gh-issue-driven), so
+        # an isolated eval arm pins its own branch instead of the issue-derived
+        # default — keeping the grounded/control arms on distinct branches/PRs.
+        # Only start CREATES the branch; implement/ship follow the worktree's
+        # current branch, so the flag belongs on start alone.
+        flag = f" --branch={branch_override}" if (phase == "start" and branch_override) else ""
+        body = f"Run the slash command `/gh-issue-driven:{phase} {issue}{flag}` to completion.\n"
         verdict_hint = "KAGURA_VERDICT=<green|yellow|red>   (the phase gate verdict)\n"
     return (
         "You are running inside an automated kagura-engineer run.\n"
@@ -298,9 +305,11 @@ def invoke_phase(
     phase: str, issue: int, worktree: Path, grounding: list[str],
     *, brain_call: BrainCall, unattended: bool = False,
     mcp_config: str | None = None, timeout: int = _PHASE_TIMEOUT_S,
+    branch_override: str | None = None,
 ) -> PhaseInvocation:
     prompt = build_prompt(phase, issue, grounding, unattended=unattended,
-                          mcp_enabled=brain_call.mcp_enabled(mcp_config))
+                          mcp_enabled=brain_call.mcp_enabled(mcp_config),
+                          branch_override=branch_override)
     # The headless launcher lives in the resolved kagura-brain backend adapter
     # (#40/#51), reached via brain_call: it owns the single launcher seam and
     # strips stale provider auth env (e.g. ANTHROPIC_API_KEY) so subscription
