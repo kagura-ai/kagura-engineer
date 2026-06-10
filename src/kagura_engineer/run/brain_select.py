@@ -52,11 +52,21 @@ class BrainCall:
 
     backend: str
     _handle: BrainHandle
+    # ENGINEER POLICY, NOT library capability. This deliberately DIVERGES from
+    # `_handle.supports_mcp`, which is the library's per-backend *capability* flag
+    # (True for both claude and codex in kagura_brain 0.4.0). We keep codex at
+    # in-task-MCP-off as a harness policy, so `mcp_enabled()`/`invoke()` MUST gate
+    # on THIS field, never on `_handle.supports_mcp` — reading the handle's flag
+    # would silently re-enable codex MCP. Flip this (not the handle) to change the
+    # policy. See the module docstring.
     supports_mcp: bool
 
     def mcp_enabled(self, mcp_config: str | None) -> bool:
         """Whether in-task MCP recall is actually live for this call — used by the
-        prompt builder. False for codex regardless of a resolved mcp_config."""
+        prompt builder. False for codex regardless of a resolved mcp_config.
+
+        Gates on `self.supports_mcp` (engineer policy), NOT `_handle.supports_mcp`
+        (library capability) — see the field comment."""
         return self.supports_mcp and bool(mcp_config)
 
     def invoke(
