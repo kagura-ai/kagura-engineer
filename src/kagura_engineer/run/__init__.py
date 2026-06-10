@@ -22,13 +22,15 @@ external boundary (`run_all`, `ensure_worktree`, `invoke_phase`, the
 from __future__ import annotations
 
 import logging
+import os
 import re
 import time
 from pathlib import Path
 from typing import Callable
 
-from ..config import Config
+from ..config import Config, ConfigError
 from ..doctor.registry import run_all
+from .brain_select import select_brain
 from .gate import evaluate
 from .memory import MemoryClient, resolve_memory_client
 from .result import STATUS_ICON, PhaseResult, RunReport, RunStatus
@@ -210,6 +212,11 @@ def run_idea(
     _record(PhaseResult("worktree", RunStatus.OK, str(wt)))
 
     # 3-5. act: start (design gate) → implement (TDD) → ship (PR gate).
+    try:
+        brain_call = select_brain(cfg, os.environ)
+    except ConfigError as exc:
+        _record(PhaseResult("brain", RunStatus.FAIL, f"backend config error: {exc}"))
+        return _finish(worktree=str(wt))
     pr_url = None
     for phase in _PHASES:
         # issue #12: announce the phase BEFORE its multi-minute claude call, so a
@@ -220,7 +227,8 @@ def run_idea(
         # nothing to package). None (unreadable) → degrade to skipping the check.
         head_before = head_rev(wt) if phase == "implement" else None
         try:
-            inv = invoke_phase(phase, issue, wt, grounding, unattended=unattended,
+            inv = invoke_phase(phase, issue, wt, grounding, brain_call=brain_call,
+                               unattended=unattended,
                                mcp_config=cfg.resolve_mcp_config(root))
         except OSError as exc:
             _log.exception("run %s phase failed to launch claude", phase)

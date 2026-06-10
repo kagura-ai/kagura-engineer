@@ -72,9 +72,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from kagura_brain import claude as brain
-
-from ..mcp import MEMORY_TOOLS
+from .brain_select import BrainCall
 
 _log = logging.getLogger(__name__)
 
@@ -298,11 +296,11 @@ def parse_pr_url(text: str) -> str | None:
 
 def invoke_phase(
     phase: str, issue: int, worktree: Path, grounding: list[str],
-    *, unattended: bool = False, mcp_config: str | None = None,
-    timeout: int = _PHASE_TIMEOUT_S,
+    *, brain_call: BrainCall, unattended: bool = False,
+    mcp_config: str | None = None, timeout: int = _PHASE_TIMEOUT_S,
 ) -> PhaseInvocation:
     prompt = build_prompt(phase, issue, grounding, unattended=unattended,
-                          mcp_enabled=bool(mcp_config))
+                          mcp_enabled=brain_call.mcp_enabled(mcp_config))
     # The headless `claude -p` launcher lives in kagura-brain's claude adapter
     # (#40): it owns the single launcher seam and strips a stale ANTHROPIC_API_KEY so the
     # subscription auth wins (#34) — no `env -u` workaround needed. We pass our
@@ -310,9 +308,8 @@ def invoke_phase(
     # not on PATH) is deliberately NOT caught here: the run guard (doctor's
     # blocking gh-issue-driven/claude check) verifies claude is launchable
     # before invoke_phase is ever reached.
-    result = brain.invoke(
-        prompt, cwd=worktree, timeout=timeout,
-        mcp_config=mcp_config, allowed_tools=MEMORY_TOOLS,
+    result = brain_call.invoke(
+        prompt, cwd=worktree, timeout=timeout, mcp_config=mcp_config,
     )
     if result.timed_out:
         # Preserve any partial output captured before the kill — invaluable for
