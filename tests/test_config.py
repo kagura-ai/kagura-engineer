@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 import yaml
+from pydantic import ValidationError
 
 from kagura_engineer.config import CLOUD_REQUIRED_FIELDS, Config, load_config
 from kagura_engineer.config import ConfigError
@@ -259,10 +260,10 @@ def test_brain_backend_accepts_codex_and_endpoint():
 
 
 def test_brain_backend_rejects_unknown_value():
-    with pytest.raises(Exception):  # pydantic ValidationError for the Literal
+    with pytest.raises(ValidationError):  # the Literal["claude","codex"] constraint
         Config.model_validate({**_minimal_local(), "brain_backend": "gpt"})
 
 
 def test_unknown_brain_key_still_forbidden():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):  # extra="forbid" rejects the typo'd key
         Config.model_validate({**_minimal_local(), "brain_backendd": "codex"})

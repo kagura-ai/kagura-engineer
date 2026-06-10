@@ -66,11 +66,12 @@ def run_fixer(
     repo: Path, prompt: str, *, brain_call: BrainCall,
     mcp_config: str | None = None, timeout: int = _FIX_TIMEOUT_S,
 ) -> FixerResult:
-    # Delegates to the shared kagura-brain claude-adapter launcher seam (#40),
-    # the same one run/workflow.py uses — so it inherits the stale-ANTHROPIC_API_KEY
-    # strip (#34). OSError (claude not on PATH) is NOT caught here — the loop's
-    # guard (doctor's blocking claude check) verifies claude is launchable first,
-    # and the loop converts any leak to a clean FAIL.
+    # Delegates to the resolved kagura-brain backend launcher seam (#40/#51) via
+    # brain_call — the same one run/workflow.py uses — so it inherits the stale
+    # provider-auth strip (#34). OSError (the backend CLI not on PATH) is NOT
+    # caught here — the loop's guard (doctor's blocking backend-CLI check)
+    # verifies the backend is launchable first, and the loop converts any leak
+    # to a clean FAIL.
     result = brain_call.invoke(
         prompt, cwd=repo, timeout=timeout, mcp_config=mcp_config,
     )

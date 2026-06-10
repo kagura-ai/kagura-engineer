@@ -219,7 +219,7 @@ def run_idea(
         return _finish(worktree=str(wt))
     pr_url = None
     for phase in _PHASES:
-        # issue #12: announce the phase BEFORE its multi-minute claude call, so a
+        # issue #12: announce the phase BEFORE its multi-minute brain call, so a
         # stalled phase shows "▶ running" rather than a blank screen until timeout.
         _emit(f"▶ {phase} …")
         # issue #9: capture HEAD before implement so we can detect whether it
@@ -231,21 +231,27 @@ def run_idea(
                                unattended=unattended,
                                mcp_config=cfg.resolve_mcp_config(root))
         except OSError as exc:
-            _log.exception("run %s phase failed to launch claude", phase)
-            _record(PhaseResult(phase, RunStatus.FAIL, f"failed to launch claude: {exc}"))
+            _log.exception("run %s phase failed to launch %s", phase, brain_call.backend)
+            _record(PhaseResult(
+                phase, RunStatus.FAIL,
+                f"failed to launch {brain_call.backend}: {exc}",
+            ))
             return _finish(worktree=str(wt))
         if inv.returncode != 0:
             if inv.timed_out:
                 tail, hint = "timed out", None
             else:
-                # issue #19: claude surfaces some fatal errors (e.g. "Invalid API
-                # key") on STDOUT, not stderr — fall back to stdout so the failure
-                # is never an opaque "claude exited 1:" with an empty tail. If BOTH
-                # streams are empty, say so explicitly rather than printing nothing.
+                # issue #19: the backend CLI surfaces some fatal errors (e.g.
+                # claude's "Invalid API key") on STDOUT, not stderr — fall back to
+                # stdout so the failure is never an opaque "<backend> exited 1:"
+                # with an empty tail. If BOTH streams are empty, say so explicitly.
                 tail = (inv.stderr.strip() or inv.stdout.strip())[-200:] \
                     or "(no output captured)"
                 hint = _auth_failure_hint(inv.stdout, inv.stderr, issue)
-            _record(PhaseResult(phase, RunStatus.FAIL, f"claude exited {inv.returncode}: {tail}"))
+            _record(PhaseResult(
+                phase, RunStatus.FAIL,
+                f"{brain_call.backend} exited {inv.returncode}: {tail}",
+            ))
             return _finish(worktree=str(wt), resume_hint=hint)
         decision = evaluate(inv.verdict)
         if not decision.proceed:

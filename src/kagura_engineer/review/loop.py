@@ -104,8 +104,11 @@ def review_fix_loop(
             try:
                 fix = run_fixer(root, prompt, brain_call=brain_call, mcp_config=mcp_config)
             except OSError as exc:
-                _log.exception("review --fix could not launch claude")
-                return _finish(ReviewStatus.FAIL, f"could not launch claude for fix: {exc}")
+                _log.exception("review --fix could not launch %s", brain_call.backend)
+                return _finish(
+                    ReviewStatus.FAIL,
+                    f"could not launch {brain_call.backend} for fix: {exc}",
+                )
             attempts += 1
             if fix.returncode != 0:
                 tail = "timed out" if fix.timed_out else (fix.stderr or "").strip()[-200:]

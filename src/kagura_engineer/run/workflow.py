@@ -301,13 +301,14 @@ def invoke_phase(
 ) -> PhaseInvocation:
     prompt = build_prompt(phase, issue, grounding, unattended=unattended,
                           mcp_enabled=brain_call.mcp_enabled(mcp_config))
-    # The headless `claude -p` launcher lives in kagura-brain's claude adapter
-    # (#40): it owns the single launcher seam and strips a stale ANTHROPIC_API_KEY so the
-    # subscription auth wins (#34) — no `env -u` workaround needed. We pass our
-    # memory-tool vocabulary as the pre-approved allowed_tools. OSError (claude
-    # not on PATH) is deliberately NOT caught here: the run guard (doctor's
-    # blocking gh-issue-driven/claude check) verifies claude is launchable
-    # before invoke_phase is ever reached.
+    # The headless launcher lives in the resolved kagura-brain backend adapter
+    # (#40/#51), reached via brain_call: it owns the single launcher seam and
+    # strips stale provider auth env (e.g. ANTHROPIC_API_KEY) so subscription
+    # auth wins (#34) — no `env -u` workaround needed. brain_call forwards our
+    # memory-tool allowed_tools only when the backend supports MCP (claude);
+    # codex omits them. OSError (the backend CLI not on PATH) is deliberately
+    # NOT caught here: the run guard (doctor's blocking backend-CLI check)
+    # verifies the selected backend is launchable before invoke_phase is reached.
     result = brain_call.invoke(
         prompt, cwd=worktree, timeout=timeout, mcp_config=mcp_config,
     )
