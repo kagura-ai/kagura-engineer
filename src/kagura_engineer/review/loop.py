@@ -45,6 +45,11 @@ def review_fix_loop(
     repo_root: Path | None = None,
 ) -> ReviewLoopReport:
     mem = memory if memory is not None else resolve_memory_client(cfg)
+    # issue #56 (same deal as run_idea / issue #14): a cloud client holds a
+    # persistent event loop + httpx client that hangs the process at exit if
+    # never closed. We close ONLY a client we created — an injected one is the
+    # caller's to own. Every exit path returns via `_finish`.
+    owns_mem = memory is None
     root = repo_root if repo_root is not None else Path.cwd()
     budget = cfg.review.max_loops if max_loops is None else max_loops
     started = time.monotonic()
@@ -53,6 +58,11 @@ def review_fix_loop(
     attempts = 0
 
     def _finish(status: ReviewStatus, detail: str, resume_hint: str | None = None) -> ReviewLoopReport:
+        if owns_mem and hasattr(mem, "close"):
+            try:
+                mem.close()
+            except Exception:  # noqa: BLE001 — teardown is best-effort
+                _log.exception("review memory client close failed (non-fatal)")
         return ReviewLoopReport(
             target=target, base=base, iterations=iterations, fixes_attempted=attempts,
             status=status, detail=detail, resume_hint=resume_hint,
