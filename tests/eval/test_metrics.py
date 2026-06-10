@@ -50,6 +50,17 @@ def test_outcome_is_halting_verdict_when_blocked():
     assert outcome_verdict(_blocked_report(verdict="unknown")) == "unknown"
 
 
+def test_outcome_blocked_without_final_verdict_maps_to_unknown():
+    # A guard-block (the final phase carries no verdict) must stay inside the
+    # outcome vocabulary — never the literal "blocked", which ArmStats.from_runs
+    # does not count (it would silently skew aggregates).
+    guard_blocked = RunReport(issue=1, phases=[
+        PhaseResult("guard", RunStatus.BLOCKED, "blocking checks failed"),
+    ])
+    assert guard_blocked.status is RunStatus.BLOCKED  # derived: worst phase
+    assert outcome_verdict(guard_blocked) == "unknown"
+
+
 def test_outcome_fail_when_run_failed():
     assert outcome_verdict(_failed_report()) == "fail"
 

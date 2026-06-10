@@ -417,9 +417,15 @@ def eval(
 
     progress = None if json_out else typer.echo
 
-    # The grounded/control arms differ by exactly one variable: run_idea's `ground`.
-    # --no-remember keeps the control arm from polluting memory with ungrounded
-    # savepoints (and keeps the measurement repeatable run-to-run).
+    # The grounded/control arms differ by exactly one variable: run_idea's `ground`
+    # (memory READ). Memory WRITE is held constant OFF for BOTH arms via
+    # no_remember=True — deliberately, not just for the control arm: it keeps the
+    # measurement repeatable run-to-run (no savepoints/feedback accrue between
+    # eval runs) and prevents cross-arm contamination through the shared
+    # `run:<issue>` resume key (a grounded-arm done-state would otherwise make the
+    # control arm resume instead of running clean). Grounding (the IV) is read;
+    # persistence (held constant) is write — so disabling write on both arms is
+    # correct, and the grounded arm's recall is unaffected.
     def _run_fn(issue: int, *, ground: bool):
         return run_idea(cfg, issue, ground=ground, no_remember=True,
                         unattended=True, progress=progress)

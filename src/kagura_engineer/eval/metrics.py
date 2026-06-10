@@ -38,13 +38,18 @@ def outcome_verdict(report: RunReport) -> str:
               a yellow anywhere downgrades the issue's label, since the run still
               shipped but not cleanly.
     BLOCKED → the halting verdict carried on the final phase (``red``/``unknown``).
+              A guard-block (or any halt with no verdict on the final phase) has
+              no halting verdict, so it maps to ``unknown`` — never the literal
+              ``"blocked"``, which is outside the outcome vocabulary
+              (green/yellow/red/unknown/fail) and would be silently dropped by
+              ``ArmStats.from_runs``.
     FAIL    → ``fail``.
     """
     if report.status is RunStatus.FAIL:
         return "fail"
     if report.status is RunStatus.BLOCKED:
         last = report.phases[-1] if report.phases else None
-        return last.verdict if (last and last.verdict) else "blocked"
+        return last.verdict if (last and last.verdict) else "unknown"
     return "yellow" if "yellow" in gate_verdicts(report) else "green"
 
 
