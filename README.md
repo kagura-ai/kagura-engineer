@@ -309,7 +309,7 @@ kagura-engineer/
 ├── pyproject.toml
 ├── docs/plan/                 # design docs (plan-2-setup.md, …)
 ├── src/kagura_engineer/
-│   ├── cli.py                 # typer app: doctor / setup / run / review / goal
+│   ├── cli.py                 # typer app: doctor / setup / run / review / goal / eval
 │   ├── config.py              # repo.yaml loader + Config (pydantic)
 │   ├── proc.py                # shared subprocess helper
 │   ├── doctor/                # Plan 1 — checks, registry, result, render
@@ -331,8 +331,10 @@ kagura-engineer/
 │   │   └── gate.py · workflow.py · worktree.py · result.py · render.py
 │   ├── review/                # Plan 4 — reviewer launch + verdict gate
 │   │   └── reviewer.py · envelope.py · loop.py · fixer.py · context.py · …
-│   └── goal/                  # milestone driver over run
-│       └── issues.py · render.py · result.py
+│   ├── goal/                  # milestone driver over run
+│   │   └── issues.py · render.py · result.py
+│   └── eval/                  # #57 — A/B: memory-grounded uplift (run loop ×2)
+│       └── metrics.py · result.py · render.py
 └── tests/                     # pytest (pythonpath = src)
 ```
 

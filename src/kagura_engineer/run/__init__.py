@@ -101,10 +101,20 @@ def run_idea(
     *,
     no_remember: bool = False,
     unattended: bool = False,
+    ground: bool = True,
     memory: MemoryClient | None = None,
     repo_root: Path | None = None,
     progress: ProgressSink | None = None,
 ) -> RunReport:
+    # issue #57: `ground` is the A/B control-arm switch. ground=True (default) is
+    # the normal grounded loop — pinned + recall + graph-expanded memory injected
+    # into every phase prompt. ground=False is the control arm: the loop runs
+    # byte-for-byte identically EXCEPT no grounding is pulled or injected
+    # (load_pinned / recall / explore are skipped, and nothing is reinforced). The
+    # resume marker (get_state/set_state) is part of the loop, not grounding, so it
+    # still works — this keeps the two arms identical apart from the one variable
+    # under test: memory grounding. The eval harness (kagura_engineer.eval) runs
+    # the same issue set in both arms and compares objective PR-quality signals.
     mem = memory if memory is not None else resolve_memory_client(cfg)
     # We close ONLY a client we created — an injected one is the caller's (goal /
     # tests) to own. Every exit path returns via `_finish`, so closing there
@@ -166,13 +176,18 @@ def run_idea(
     # 1. recall — grounding + resume point. Memory is core: a failure here
     # is a hard FAIL (we do not run ungrounded), surfaced cleanly not as a crash.
     recalled_ids: list[str] = []
+    recalled: list[tuple[str, str]] = []
+    grounding: list[str] = []
     try:
-        pinned = mem.load_pinned(cfg.context_id)
-        recalled = mem.recall_detailed(
-            cfg.context_id, f"issue {issue} implementation context", k=5
-        )
-        recalled_ids = [mid for mid, _ in recalled]
-        grounding = pinned + [s for _, s in recalled]
+        # Control arm (ground=False): pull NO grounding — skip pinned/recall
+        # entirely so the loop runs ungrounded. Resume state is read either way.
+        if ground:
+            pinned = mem.load_pinned(cfg.context_id)
+            recalled = mem.recall_detailed(
+                cfg.context_id, f"issue {issue} implementation context", k=5
+            )
+            recalled_ids = [mid for mid, _ in recalled]
+            grounding = pinned + [s for _, s in recalled]
         resumed = mem.get_state(cfg.context_id, _state_key(issue))
     except Exception as exc:  # noqa: BLE001 — convert any SDK leak to a FAIL phase
         _log.exception("run recall phase failed")
@@ -192,7 +207,12 @@ def run_idea(
         except Exception:  # noqa: BLE001 — graph enrichment is best-effort
             _log.exception("run explore enrichment failed (non-fatal)")
 
-    detail = f"{len(grounding)} memories" + (" (resuming)" if resumed else "")
+    if ground:
+        detail = f"{len(grounding)} memories" + (" (resuming)" if resumed else "")
+    else:
+        # Control arm: name the disabled-grounding state so the report is honest
+        # about which A/B arm produced it.
+        detail = "grounding off (control arm)" + (" (resuming)" if resumed else "")
     _record(PhaseResult("recall", RunStatus.OK, detail))
 
     # 1b. cheap resume: a prior run already shipped this issue → no-op (skip

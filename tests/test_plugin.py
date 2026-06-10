@@ -32,8 +32,8 @@ PYPROJECT = REPO_ROOT / "pyproject.toml"
 
 # Every CLI verb that gets a skill wrapper. init/doctor/setup are setup helpers
 # (init scaffolds repo.yaml); run/review/goal are the harness flows.
-EXPECTED_SKILLS = ["init", "doctor", "setup", "run", "review", "goal"]
-HARNESS_SKILLS = ["run", "review", "goal"]
+EXPECTED_SKILLS = ["init", "doctor", "setup", "run", "review", "goal", "eval"]
+HARNESS_SKILLS = ["run", "review", "goal", "eval"]
 
 _FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n", re.DOTALL)
 
