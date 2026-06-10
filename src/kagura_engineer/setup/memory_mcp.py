@@ -111,6 +111,16 @@ def ensure_memory_mcp_config(
     # SDK's own _check_gitignore treats BOTH as secrets but only *warns* — it
     # never adds them. Establish the ignore rules first; if we cannot, refuse to
     # write so a secret can never land un-ignored.
+    #
+    # Policy (issue #47, decided wontfix): this gate fires uniformly for ALL auth
+    # forms, including the OAuth/stdio `.mcp.json` that bakes in no secret. We do
+    # NOT make the refuse auth-form-aware. The asymmetry is real — a secretless
+    # OAuth deployment with an unwritable `.gitignore` is blocked from writing a
+    # config that has nothing to protect — but a single, uniform fail-secure rule
+    # is simpler to reason about and audit than one that branches on the resolved
+    # credential, and an unwritable repo `.gitignore` is itself an unusual state
+    # worth surfacing. If a real secretless deployment ever needs this relaxed,
+    # gate the refuse on the secret-bearing (`ENV_API_KEY`) form only — see #47.
     for _secret in _SECRET_FILES:
         try:
             ensure_gitignore_entry(
