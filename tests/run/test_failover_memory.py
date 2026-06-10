@@ -1,4 +1,6 @@
 import json
+import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -164,6 +166,53 @@ def test_append_failure_preserves_no_raise(tmp_path):
     # Even though the WAL write fails, remember must NOT raise.
     rid = c.remember("ctx", summary="s", content="x", type="savepoint")
     assert rid.startswith("wal:")
+
+
+@pytest.fixture
+def permissive_umask():
+    """Force the classic permissive umask (022) so the perms tests fail unless
+    the code sets modes explicitly — not because the host umask happens to be
+    strict already."""
+    old = os.umask(0o022)
+    yield
+    os.umask(old)
+
+
+def _mode(path) -> int:
+    return stat.S_IMODE(Path(path).stat().st_mode)
+
+
+def test_wal_file_and_dir_are_private(tmp_path, permissive_umask):
+    # Issue #53: the WAL holds memory payloads (remember content, set_state
+    # values) — it must never be world-readable, regardless of umask.
+    inner = _FakeInner(); inner.fail_writes = True
+    wal_path = tmp_path / "wal-dir" / "wal.jsonl"
+    c = FailoverMemoryClient(inner, wal_path)
+    c.remember("ctx", summary="secret", content="secret", type="savepoint")
+    assert _mode(wal_path) == 0o600
+    assert _mode(wal_path.parent) == 0o700
+
+
+def test_wal_rewrite_after_partial_drain_stays_private(tmp_path, permissive_umask):
+    # drain() rewrites the WAL via a temp file + os.replace; the rewritten
+    # file (and the temp file while it exists) must keep owner-only perms.
+    inner = _FakeInner(); inner.fail_writes = True
+    wal_path = tmp_path / "wal.jsonl"
+    c = FailoverMemoryClient(inner, wal_path)
+    c.remember("ctx", summary="s1", content="x", type="savepoint")
+    c.remember("ctx", summary="s2", content="x", type="savepoint")
+
+    # First replay succeeds, second fails → WAL is rewritten with the tail.
+    calls = {"n": 0}
+    def flaky_remember(context_id, *, summary, content, type, tags=None):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("cloud down again")
+    inner.remember = flaky_remember
+
+    assert c.drain() == 1
+    assert len(_wal_records(wal_path)) == 1   # rewrite actually happened
+    assert _mode(wal_path) == 0o600
 
 
 def test_drain_replays_in_order_and_empties_wal(tmp_path):
