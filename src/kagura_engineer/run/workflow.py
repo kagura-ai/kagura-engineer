@@ -11,6 +11,15 @@ at the very end:
 parses those markers. A missing verdict marker parses to None, which the
 gate treats as a halt (safe default).
 
+Echoed-marker spoof hardening (issue #54). Marker extraction is anchored to the
+tail of stdout and prefers the contract-shaped trailing pair over lone marker
+lines, so neither a marker echoed mid-transcript nor one echoed after the
+genuine closing block can flip the gate verdict or the PR URL — see the
+rationale at the `_MARKER_TAIL_CHARS` / `_MARKER_PAIR_RE` definitions. The
+native `## Verdict:` fallback below deliberately keeps its full-text scan: gate
+reports legitimately put the verdict line before detailed findings, so
+tail-anchoring it would trade a spoof hole for false halts.
+
 Native-verdict fallback (issue #2). In practice the model sometimes runs the
 delegated skill to completion but drops the trailing `KAGURA_VERDICT=` marker,
 because the skill closes with its own `## Verdict: <green|yellow|red>` line and
@@ -73,6 +82,26 @@ _PHASE_TIMEOUT_S = 1800  # 30 min per phase
 
 _VERDICT_RE = re.compile(r"^KAGURA_VERDICT=(\w+)\s*$", re.MULTILINE)
 _PR_RE = re.compile(r"^KAGURA_PR_URL=(\S+)\s*$", re.MULTILINE)
+# Echoed-marker spoof hardening (issue #54). `findall(text)[-1]` over the whole
+# stdout let a marker echoed AFTER the genuine trailing verdict win — a
+# transcript printing the real `KAGURA_VERDICT=red` then echoing a bare
+# `KAGURA_VERDICT=green` recap line parsed green, so the fail-secure gate
+# proceeded on a red. Two anchors close this:
+#   1. Markers are read only from the last _MARKER_TAIL_CHARS of stdout — the
+#      prompt demands the markers be the LAST lines, so a marker buried deep in
+#      the transcript (e.g. the model quoting the prompt's own instructions) is
+#      noise, not a verdict. No marker in the tail → native fallback → None →
+#      halt (fail-secure).
+#   2. Within the tail, the contract-shaped pair — `KAGURA_VERDICT=` immediately
+#      followed by `KAGURA_PR_URL=` — is authoritative over any lone marker:
+#      only the genuine closing block has that shape, so a bare marker echoed
+#      after it cannot flip the verdict (or the PR URL). Lone markers are still
+#      honoured when no pair exists, preserving the historical leniency for
+#      transcripts that drop one of the two lines.
+_MARKER_TAIL_CHARS = 500
+_MARKER_PAIR_RE = re.compile(
+    r"^KAGURA_VERDICT=(\w+)[ \t]*\n+KAGURA_PR_URL=(\S+)[ \t]*$", re.MULTILINE
+)
 # Blessed secondary contract: the native `## Verdict:` line emitted by the
 # c-suite / gh-issue-driven skills. Consulted only when the KAGURA_VERDICT=
 # marker is absent (see module docstring). green|yellow|red only — `decline`
@@ -223,7 +252,14 @@ def parse_verdict(text: str, phase: str | None = None) -> str | None:
     normalise = (
         (lambda v: _SHIP_VERDICT_MAP.get(v, v)) if phase == "ship" else (lambda v: v)
     )
-    matches = _VERDICT_RE.findall(text or "")
+    # Markers are tail-anchored and pair-first (issue #54, rationale at the
+    # regex definitions): only the trailing window is scanned, and within it the
+    # contract-shaped VERDICT+PR_URL pair beats any echoed lone marker.
+    tail = (text or "")[-_MARKER_TAIL_CHARS:]
+    pairs = _MARKER_PAIR_RE.findall(tail)
+    if pairs:
+        return normalise(pairs[-1][0].lower())
+    matches = _VERDICT_RE.findall(tail)
     if matches:
         return normalise(matches[-1].lower())
     # Marker absent → fall back to the native `## Verdict:` line (issue #2),
@@ -234,10 +270,18 @@ def parse_verdict(text: str, phase: str | None = None) -> str | None:
 
 
 def parse_pr_url(text: str) -> str | None:
-    matches = _PR_RE.findall(text or "")
-    if not matches:
-        return None
-    url = matches[-1]
+    # Same tail + pair-first anchoring as parse_verdict (issue #54): the URL in
+    # the genuine trailing pair wins over a later echoed lone URL, and a `-`
+    # there stays None rather than letting an echo fabricate a shipped PR.
+    tail = (text or "")[-_MARKER_TAIL_CHARS:]
+    pairs = _MARKER_PAIR_RE.findall(tail)
+    if pairs:
+        url = pairs[-1][1]
+    else:
+        matches = _PR_RE.findall(tail)
+        if not matches:
+            return None
+        url = matches[-1]
     return None if url == "-" else url
 
 
