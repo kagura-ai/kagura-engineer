@@ -96,11 +96,18 @@ class FailoverMemoryClient:
         the caller's no-raise contract holds — the write is then truly lost, which
         is the same outcome as a dropped best-effort write."""
         try:
-            self._wal_path.parent.mkdir(parents=True, exist_ok=True)
+            # The WAL carries memory payloads (remember content, set_state
+            # values) — keep dir and file owner-only regardless of umask (#53).
+            # mkdir's mode and os.open's mode only apply at creation, so chmod /
+            # fchmod retroactively tighten artifacts left by pre-fix versions.
+            self._wal_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            os.chmod(self._wal_path.parent, 0o700)
             records = self._read_records()
             seq = max((r.get("seq", 0) for r in records), default=0) + 1
             record = {"seq": seq, "op": op, "context_id": context_id, "kwargs": kwargs}
-            with open(self._wal_path, "a", encoding="utf-8") as f:
+            fd = os.open(self._wal_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            with open(fd, "a", encoding="utf-8") as f:
+                os.fchmod(f.fileno(), 0o600)
                 f.write(json.dumps(record) + "\n")
                 f.flush()
                 os.fsync(f.fileno())
@@ -150,7 +157,13 @@ class FailoverMemoryClient:
             self._wal_path.unlink(missing_ok=True)
             return
         tmp = self._wal_path.with_suffix(self._wal_path.suffix + ".tmp")
-        with open(tmp, "w", encoding="utf-8") as f:
+        # Owner-only like _append — os.replace would otherwise swap the 0600
+        # WAL for a umask-default (world-readable) rewrite (#53). fchmod also
+        # covers a leftover world-readable .tmp from a crashed pre-fix drain,
+        # which O_TRUNC alone would reuse with its old mode.
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with open(fd, "w", encoding="utf-8") as f:
+            os.fchmod(f.fileno(), 0o600)
             f.write("\n".join(json.dumps(r) for r in records) + "\n")
             f.flush()
             os.fsync(f.fileno())

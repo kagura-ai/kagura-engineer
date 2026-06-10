@@ -6,6 +6,8 @@ and provides a `Config` instance directly.
 """
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from kagura_engineer.config import Config
@@ -45,3 +47,13 @@ def valid_config() -> Config:
         workspace_id=VALID_WORKSPACE,
         context_id=VALID_CONTEXT_UUID,
     )
+
+
+@pytest.fixture
+def permissive_umask():
+    """Force the classic permissive umask (022) so the perms tests fail unless
+    the code sets modes explicitly — not because the host umask happens to be
+    strict already."""
+    old = os.umask(0o022)
+    yield
+    os.umask(old)
