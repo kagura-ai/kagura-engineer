@@ -15,10 +15,13 @@ See docs/superpowers/specs/2026-06-08-failover-memory-design.md.
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
 import os
 import uuid
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +41,7 @@ class FailoverMemoryClient:
     def __init__(self, inner: MemoryClient, wal_path: Path) -> None:
         self._inner = inner
         self._wal_path = Path(wal_path)
+        self._lock_path = self._wal_path.with_name(self._wal_path.name + ".lock")
 
     # --- reads: delegate, let failures propagate (Cloud-primary) -------------
     def load_pinned(self, context_id: str) -> list[str]:
@@ -89,6 +93,21 @@ class FailoverMemoryClient:
     def unpin(self, context_id: str, memory_id: str) -> None:
         self._inner.unpin(context_id, memory_id)
 
+    # --- WAL locking ----------------------------------------------------------
+    @contextmanager
+    def _wal_lock(self) -> Generator[None]:
+        """Exclusive cross-process lock serialising every WAL read-modify-write
+        (`_append` and `drain`). A sidecar `<wal>.lock` file is locked instead of
+        the WAL itself because drain unlinks/`os.replace`s the WAL — a lock on
+        that inode would silently stop excluding once the path is swapped."""
+        self._lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self._lock_path, "w", encoding="utf-8") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
     # --- WAL append (best-effort durable) ------------------------------------
     def _append(self, op: str, context_id: str, kwargs: dict[str, Any]) -> None:
         """Durably append one WAL record. Best-effort: a WAL write failure (disk
@@ -97,57 +116,80 @@ class FailoverMemoryClient:
         is the same outcome as a dropped best-effort write."""
         try:
             # The WAL carries memory payloads (remember content, set_state
-            # values) — keep dir and file owner-only regardless of umask (#53).
-            # mkdir's mode and os.open's mode only apply at creation, so chmod /
-            # fchmod retroactively tighten artifacts left by pre-fix versions.
+            # values) — keep the dir owner-only regardless of umask (#53).
+            # mkdir's mode only applies at creation, so chmod retroactively
+            # tightens a dir left world-readable by a pre-fix version.
             self._wal_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             os.chmod(self._wal_path.parent, 0o700)
-            records = self._read_records()
-            seq = max((r.get("seq", 0) for r in records), default=0) + 1
-            record = {"seq": seq, "op": op, "context_id": context_id, "kwargs": kwargs}
-            fd = os.open(self._wal_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-            with open(fd, "a", encoding="utf-8") as f:
-                os.fchmod(f.fileno(), 0o600)
-                f.write(json.dumps(record) + "\n")
-                f.flush()
-                os.fsync(f.fileno())
+            with self._wal_lock():
+                self._append_locked(op, context_id, kwargs)
         except Exception:  # noqa: BLE001 — WAL buffering is itself best-effort
             _log.exception("WAL append failed; write is lost (op=%s)", op)
 
+    def _append_locked(self, op: str, context_id: str, kwargs: dict[str, Any]) -> None:
+        records = self._read_records()
+        seq = max((r.get("seq", 0) for r in records), default=0) + 1
+        record = {"seq": seq, "op": op, "context_id": context_id, "kwargs": kwargs}
+        # Owner-only (0o600) regardless of umask; fchmod retroactively tightens a
+        # file left world-readable by a pre-fix version (#53).
+        fd = os.open(self._wal_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with open(fd, "a", encoding="utf-8") as f:
+            os.fchmod(f.fileno(), 0o600)
+            f.write(json.dumps(record) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+
     def _read_records(self) -> list[dict]:
+        """Parse the WAL, skipping undecodable lines (e.g. a partial tail record
+        from a crash mid-append) so one corrupt line cannot drop the whole WAL.
+        Decoding is lossy (errors="replace") for the same reason: valid records
+        are ASCII-only (json.dumps escapes non-ASCII), so replacement characters
+        can only land in already-corrupt lines, which then fail json.loads and
+        are skipped instead of raising UnicodeDecodeError for the whole file."""
         if not self._wal_path.exists():
             return []
-        return [
-            json.loads(line)
-            for line in self._wal_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
+        records: list[dict] = []
+        text = self._wal_path.read_text(encoding="utf-8", errors="replace")
+        for line in text.splitlines():
+            if not line.strip():
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                _log.warning("skipping corrupt WAL record in %s: %.80r",
+                             self._wal_path, line)
+        return records
 
     # --- replay (drain) ------------------------------------------------------
     def drain(self) -> int:
         """Replay buffered WAL records to the inner cloud client in order. Drop
         each record on success; stop at the first failure and keep the rest for
-        the next drain. Returns the count replayed."""
-        records = self._read_records()
-        if not records:
-            return 0
-        replayed = 0
-        remaining: list[dict] = []
-        stop = False
-        for rec in records:
-            if stop:
-                remaining.append(rec)
-                continue
-            try:
-                if self._replay(rec):
-                    replayed += 1
-            except Exception:  # noqa: BLE001 — cloud still down; keep this + rest
-                _log.warning("WAL replay failed at seq %s; %d records retained",
-                             rec.get("seq"), len(records) - replayed)
-                stop = True
-                remaining.append(rec)
-        self._write_records(remaining)
-        return replayed
+        the next drain. Returns the count replayed.
+
+        Holds the WAL lock across the whole read→replay→write so a concurrent
+        run cannot replay the same records twice or have its own buffered
+        writes clobbered by this drain's rewrite (issue #55)."""
+        with self._wal_lock():
+            records = self._read_records()
+            if not records:
+                return 0
+            replayed = 0
+            remaining: list[dict] = []
+            stop = False
+            for rec in records:
+                if stop:
+                    remaining.append(rec)
+                    continue
+                try:
+                    if self._replay(rec):
+                        replayed += 1
+                except Exception:  # noqa: BLE001 — cloud still down; keep this + rest
+                    _log.warning("WAL replay failed at seq %s; %d records retained",
+                                 rec.get("seq"), len(records) - replayed)
+                    stop = True
+                    remaining.append(rec)
+            self._write_records(remaining)
+            return replayed
 
     def _write_records(self, records: list[dict]) -> None:
         """Atomically + durably replace the WAL with `records` (empty → remove).
