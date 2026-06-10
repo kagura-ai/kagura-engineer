@@ -867,11 +867,11 @@ wheels = [
 
 [[package]]
 name = "kagura-brain"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/69/02/7ebbad53e6c1cc5a33549de5bb7a5f4a88b20b710805176f02135c0a6929/kagura_brain-0.1.0.tar.gz", hash = "sha256:16c905afaeef6e838b1a185dfab0a9d856f483ccf0942f14cc4165b6407fd1c9", size = 63752, upload-time = "2026-06-09T17:02:28.364Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d3/be/389815edc679b478ab4eaf098520677aeb5e1e1b165947a4da753d2170fd/kagura_brain-0.2.0.tar.gz", hash = "sha256:8db173fcf949c5335121f2e61c8e23bdb08fe1e98b83650d5b689165c6537633", size = 69928, upload-time = "2026-06-10T05:10:05.03Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/64/2d/712084989bc061642ca825b5b2aae9be580429c1c94a5add8a3d097376d4/kagura_brain-0.1.0-py3-none-any.whl", hash = "sha256:b3211865a4adb37ddc61ac0d8b8e9da9fd0840305920eaaa8816f8eda4422db6", size = 20727, upload-time = "2026-06-09T17:02:27.129Z" },
+    { url = "https://files.pythonhosted.org/packages/6b/38/f757a2c5fd972371504c330d17dcab2c1dfcd7a838009e5f94694503b29d/kagura_brain-0.2.0-py3-none-any.whl", hash = "sha256:173c21a5432ccd247d36410f9dc1b004404fd58bdf28d6e340a1e7ebb936bf37", size = 24949, upload-time = "2026-06-10T05:10:03.794Z" },
 ]
 
 [[package]]
@@ -913,7 +913,7 @@ review = [
 
 [package.metadata]
 requires-dist = [
-    { name = "kagura-brain", specifier = ">=0.1.0,<0.2" },
+    { name = "kagura-brain", specifier = ">=0.2.0,<0.3" },
     { name = "kagura-code-reviewer", marker = "extra == 'review'" },
     { name = "kagura-memory", specifier = ">=0.30,<0.31" },
     { name = "pydantic", specifier = ">=2.7" },
