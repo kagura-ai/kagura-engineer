@@ -385,6 +385,27 @@ def test_invoke_phase_forwards_unattended_into_prompt(tmp_path):
     assert "UNATTENDED" in cap["prompt"]
 
 
+def test_build_prompt_start_pins_branch_override():
+    # issue #57: an isolated arm forces start onto its own branch via --branch.
+    p = workflow.build_prompt("start", 7, [], branch_override="run-7-control")
+    assert "/gh-issue-driven:start 7 --branch=run-7-control" in p
+
+
+def test_build_prompt_branch_override_only_on_start():
+    # implement/ship follow the worktree's current branch — the flag must NOT
+    # leak onto them (only start CREATES the branch).
+    assert "--branch" not in workflow.build_prompt("ship", 7, [], branch_override="run-7-control")
+    assert "--branch" not in workflow.build_prompt("start", 7, [])  # none unless overridden
+
+
+def test_invoke_phase_forwards_branch_override_into_start_prompt(tmp_path):
+    cap = {}
+    call = _fake_brain_call(stdout="KAGURA_VERDICT=green\n", capture=cap)
+    workflow.invoke_phase("start", 7, tmp_path, [], brain_call=call,
+                          branch_override="run-7-grounded")
+    assert "--branch=run-7-grounded" in cap["prompt"]
+
+
 def test_build_prompt_mcp_note_when_enabled():
     p = workflow.build_prompt("start", 1, [], mcp_enabled=True)
     assert "mcp__kagura-memory__recall" in p

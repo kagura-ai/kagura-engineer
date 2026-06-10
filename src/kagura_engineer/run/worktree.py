@@ -25,17 +25,28 @@ def worktree_root(repo_root: Path) -> Path:
     return repo_root.parent / ".kagura-runs" / repo_root.name
 
 
-def worktree_path(repo_root: Path, issue: int) -> Path:
-    """Full path to the worktree for `issue` under this repo's run root."""
-    return worktree_root(repo_root) / f"run-{issue}"
+def worktree_path(repo_root: Path, issue: int, *, label: str | None = None) -> Path:
+    """Full path to the worktree for `issue` under this repo's run root.
+
+    `label` names an isolated *arm* of the same issue (e.g. the eval harness's
+    ``grounded``/``control`` arms — issue #57): ``run-<issue>-<label>`` instead of
+    ``run-<issue>``, so two arms of one issue never share a worktree (and so the
+    grounded arm's commits cannot contaminate the control arm). ``None`` keeps the
+    historical ``run-<issue>`` name — normal runs are unchanged.
+    """
+    name = f"run-{issue}" if label is None else f"run-{issue}-{label}"
+    return worktree_root(repo_root) / name
 
 
-def ensure_worktree(repo_root: Path, issue: int, *, base: str = "HEAD") -> Path:
+def ensure_worktree(
+    repo_root: Path, issue: int, *, base: str = "HEAD", label: str | None = None
+) -> Path:
     """Return the worktree path, creating it off `base` if absent.
 
-    If the path already exists this is a resume: return it untouched.
+    If the path already exists this is a resume: return it untouched. `label`
+    selects an isolated per-arm worktree (see `worktree_path`).
     """
-    path = worktree_path(repo_root, issue)
+    path = worktree_path(repo_root, issue, label=label)
     if path.exists():
         return path
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -427,8 +427,12 @@ def eval(
     # persistence (held constant) is write — so disabling write on both arms is
     # correct, and the grounded arm's recall is unaffected.
     def _run_fn(issue: int, *, ground: bool):
+        # issue #57: per-arm isolation — each arm runs in its own
+        # run-<issue>-<arm> worktree/branch/resume-key (run_label), so the control
+        # arm never reuses the grounded arm's worktree/branch/PR.
         return run_idea(cfg, issue, ground=ground, no_remember=True,
-                        unattended=True, progress=progress)
+                        unattended=True, progress=progress,
+                        run_label="grounded" if ground else "control")
 
     review_fn: ReviewFn | None = None
     if review:

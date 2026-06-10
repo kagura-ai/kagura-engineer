@@ -63,11 +63,14 @@ branch and roughly doubles cost again.
 > (and, with `--review`, the fix loop on top). It mutates the repo and creates a
 > PR per arm. Run it on a **pinned, disposable issue set** — not production work.
 >
-> Because both arms drive the *same* issue number through `run_idea`, run the two
-> arms in **separate checkouts/clones** of the repo (one per arm) so their
-> worktrees and branches do not collide. The harness uses `--no-remember` so the
-> control arm never writes ungrounded savepoints back into memory (which would
-> contaminate a later grounded run and the measurement's repeatability).
+> Both arms drive the *same* issue number, so the harness isolates them
+> automatically: each arm runs in its own `run-<issue>-<arm>` worktree, on its own
+> `--branch=run-<issue>-<arm>` (so it opens a distinct PR), under its own
+> `run:<issue>:<arm>` resume key. The grounded arm's worktree/branch/PR can
+> therefore never bleed into the control arm. The harness also uses
+> `--no-remember` for both arms so neither writes savepoints back into memory
+> (which would contaminate a later grounded run and the measurement's
+> repeatability). You still get **two PRs per issue** — run on a disposable set.
 
 1. Pick a fixed, representative, disposable issue set (e.g. a milestone of
    closed-then-reopened issues, or a synthetic fixture milestone). Record the
@@ -126,10 +129,11 @@ on the pinned set below.
 - **Not a significance test.** The verdict is a net-direction summary over a small
   issue set. For a publishable claim, run a large enough set and report
   per-issue variance, not just the mean delta.
-- **Arm isolation is operational.** The harness drives the same issue number
-  through both arms; isolating their branches/worktrees (separate checkouts) is
-  the operator's responsibility — see *How to reproduce*. A future improvement
-  could automate per-arm worktree/branch suffixing.
+- **Arm isolation is automatic, PR cleanup is not.** Each arm gets its own
+  worktree/branch/resume-key (`run-<issue>-<arm>`), so the arms cannot contaminate
+  each other — but the two PRs per issue are left open for inspection; pruning
+  them (and their worktrees) afterwards is the operator's job. Run on a disposable
+  issue set.
 - **Memory state is a hidden variable.** The grounded arm's quality depends on
   what memory actually contains. A cold/empty context will show little uplift;
   that is a true signal about onboarding, not a harness bug.
