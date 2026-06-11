@@ -8,6 +8,29 @@ While the project is in `0.x`, minor versions may carry breaking changes.
 
 ## [Unreleased]
 
+## [0.3.2] — 2026-06-11
+
+### Added
+
+- Execution-profile visibility (#70): `doctor` now prints the resolved execution
+  profile (brain backend/endpoint + in-task-MCP policy, reviewer model + Ollama
+  URL, memory backend/workspace/context/failover/MCP) above the check table, and
+  `run`/`goal`/`review`/`eval` print it as a startup header (suppressed under
+  `--json`). A new cloud-only `memory-context` doctor check live-resolves
+  `context_id` to its context **name** via the memory SDK, catching a
+  wildcard/stale binding that points recall at the wrong context. Every `--json`
+  report gains a `profile` field, and `run` emits a grounding-evidence line
+  (`grounding: pinned N + recalled M from context …`) after the recall phase.
+
+### Changed
+
+- First-install UX (#71): `doctor` and `setup` no longer refuse on a missing or
+  invalid `repo.yaml`. `setup` auto-scaffolds the template (as `init` does) and
+  reports a synthetic `config` NEEDS_USER step while still running the
+  config-free steps; `doctor` prints a degraded report — a `config` FAIL row plus
+  every config-free check — instead of exiting early. `kagura-engineer setup` is
+  now the only command a fresh checkout needs to type first.
+
 ## [0.3.1] — 2026-06-11
 
 ### Added
