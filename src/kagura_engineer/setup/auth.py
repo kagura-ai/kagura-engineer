@@ -79,7 +79,7 @@ def resolve_anthropic_auth(
     # credential store, so any non-empty content is proof of a login.
     modern = home / ".claude" / ".credentials.json"
     try:
-        if modern.read_text():
+        if modern.read_text(encoding="utf-8"):
             return AuthResolution(
                 method=AuthMethod.SUBSCRIPTION_CACHE,
                 detail=f"subscription login detected (modern cache: {modern})",
@@ -95,7 +95,7 @@ def resolve_anthropic_auth(
     # subscription login actually happened.
     legacy = home / ".claude.json"
     try:
-        raw = legacy.read_text()
+        raw = legacy.read_text(encoding="utf-8")
     except OSError:
         raw = ""
     if raw:

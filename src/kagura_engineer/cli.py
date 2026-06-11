@@ -209,7 +209,7 @@ def _written_backend_needs_creds(repo_yaml_path: Path) -> bool:
     affordance, never a hard gate.
     """
     try:
-        data = yaml.safe_load(repo_yaml_path.read_text()) or {}
+        data = yaml.safe_load(repo_yaml_path.read_text(encoding="utf-8")) or {}
     except (OSError, yaml.YAMLError):
         return False
     if not isinstance(data, dict):

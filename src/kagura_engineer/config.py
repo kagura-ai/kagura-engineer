@@ -133,7 +133,7 @@ def load_config(path: str | Path) -> Config:
             f"config not found: {p} — run `kagura-engineer init` to scaffold a repo.yaml"
         )
     try:
-        text = p.read_text()
+        text = p.read_text(encoding="utf-8")
     except OSError as exc:
         # Present but unreadable (mode 000, foreign owner, non-traversable
         # dir). The docstring promises ConfigError for an unreadable config;

@@ -86,7 +86,7 @@ def is_wsl() -> bool:
     """True when running under WSL (1 or 2) on Windows."""
     proc_version = Path("/proc/version")
     try:
-        text = proc_version.read_text(errors="replace").lower()
+        text = proc_version.read_text(encoding="utf-8", errors="replace").lower()
     except OSError:
         return False
     return "microsoft" in text or "wsl" in text

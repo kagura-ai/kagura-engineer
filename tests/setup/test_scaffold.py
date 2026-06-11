@@ -163,3 +163,53 @@ class TestTemplateConfigRoundTrip:
         data["context_id"] = "ctx"
         cfg = Config.model_validate(data)
         assert cfg.memory_backend == "cloud"
+
+
+class TestEncodingPinnedToUtf8:
+    """Regression: scaffold must open text files with an explicit ``utf-8``
+    encoding, not the locale default. On a legacy non-UTF-8 default (cp932 on
+    Windows-JP) an unencoded ``read_text``/``write_text`` crashes on a UTF-8
+    ``.gitignore`` containing a byte invalid in that codec (the original Windows
+    ``init`` traceback). Asserting the explicit encoding is locale- and
+    UTF-8-mode-independent, so it fails on the bug on every CI runner."""
+
+    @staticmethod
+    def _spy_text_opens(monkeypatch: pytest.MonkeyPatch, seen: list) -> None:
+        import io
+
+        real_open = io.open
+
+        def spy(*args, **kwargs):
+            # pathlib calls io.open(file, mode, buffering, encoding, errors,
+            # newline) positionally; read encoding from arg 3 (or the kwarg) and
+            # forward everything verbatim to avoid a dup-argument TypeError.
+            file = args[0] if args else kwargs.get("file", "")
+            mode = args[1] if len(args) > 1 else kwargs.get("mode", "r")
+            enc = args[3] if len(args) > 3 else kwargs.get("encoding")
+            name = str(file)
+            if "b" not in mode and (name.endswith(".gitignore") or name.endswith("repo.yaml")):
+                seen.append(enc)
+            return real_open(*args, **kwargs)
+
+        monkeypatch.setattr(io, "open", spy)
+
+    def test_gitignore_read_and_write_pin_utf8(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / ".gitignore").write_text("# memo 🎉\nbuild/\n", encoding="utf-8")
+        seen: list = []
+        self._spy_text_opens(monkeypatch, seen)
+        assert scaffold.ensure_gitignore_entry(tmp_path, "repo.yaml", label="dev") is True
+        assert seen, "expected the .gitignore to be opened as text"
+        assert all(e == "utf-8" for e in seen), f"unencoded open observed: {seen}"
+        out = (tmp_path / ".gitignore").read_text(encoding="utf-8")
+        assert "🎉" in out and "repo.yaml" in out
+
+    def test_repo_yaml_write_pins_utf8(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: list = []
+        self._spy_text_opens(monkeypatch, seen)
+        assert scaffold.ensure_repo_yaml(tmp_path) is True
+        assert seen, "expected repo.yaml to be opened as text"
+        assert all(e == "utf-8" for e in seen), f"unencoded open observed: {seen}"

@@ -42,5 +42,5 @@ def build_context_file(grounding: list[str], path: Path) -> Path | None:
     if not items:
         return None
     body = "\n".join(f"- {_sanitize(g)}" for g in items)
-    path.write_text(_HEADER + body + _FOOTER)
+    path.write_text(_HEADER + body + _FOOTER, encoding="utf-8")
     return path

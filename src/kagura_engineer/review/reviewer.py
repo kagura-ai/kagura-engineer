@@ -94,7 +94,7 @@ def run_reviewer(
         )
 
     no_changes = _NO_CHANGES in (proc.stdout or "")
-    if out.is_file() and (content := out.read_text()).strip():
+    if out.is_file() and (content := out.read_text(encoding="utf-8")).strip():
         env = ReviewEnvelope.from_text(content)
     else:
         env = ReviewEnvelope.from_text(proc.stdout)

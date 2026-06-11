@@ -71,13 +71,16 @@ def ensure_gitignore_entry(repo_dir: str | Path, entry: str, *, label: str) -> b
     file when absent and tolerates an existing file with no trailing newline.
     """
     path = Path(repo_dir) / ".gitignore"
-    existing = path.read_text() if path.exists() else ""
+    # Pin utf-8 on every text read/write: the OS-default encoding (cp932 on
+    # Windows-JP) crashes on a UTF-8 .gitignore carrying a byte invalid in that
+    # codec, and would round-trip-corrupt non-ASCII content on write.
+    existing = path.read_text(encoding="utf-8") if path.exists() else ""
     if entry in existing.splitlines():
         return False
     if existing and not existing.endswith("\n"):
         existing += "\n"
     separator = "\n" if existing else ""  # blank line before an appended block
-    path.write_text(f"{existing}{separator}# {label}\n{entry}\n")
+    path.write_text(f"{existing}{separator}# {label}\n{entry}\n", encoding="utf-8")
     return True
 
 
@@ -90,7 +93,7 @@ def ensure_repo_yaml(repo_dir: str | Path) -> bool:
     path = Path(repo_dir) / REPO_YAML_NAME
     if path.exists():
         return False
-    path.write_text(REPO_YAML_TEMPLATE)
+    path.write_text(REPO_YAML_TEMPLATE, encoding="utf-8")
     return True
 
 
