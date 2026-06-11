@@ -58,3 +58,36 @@ def test_print_loop_table_runs(capsys):
     out = capsys.readouterr().out
     assert "fix(es)" in out
     assert "iterations:" in out  # multi-iteration trail shown
+
+
+def test_to_json_carries_profile():
+    # issue #70: the review report serialises its ExecutionProfile.
+    from dataclasses import replace
+
+    from kagura_engineer.profile import ExecutionProfile
+    from tests._constants import EXECUTION_PROFILE_KWARGS
+
+    report = replace(_report(), profile=ExecutionProfile(**EXECUTION_PROFILE_KWARGS))
+    data = json.loads(to_json(report))
+    assert data["profile"]["reviewer_model"] == "qwen3-coder:480b"
+
+
+def test_loop_to_json_carries_profile():
+    from dataclasses import replace
+
+    from kagura_engineer.profile import ExecutionProfile
+    from kagura_engineer.review.render import loop_to_json
+    from kagura_engineer.review.result import ReviewLoopReport
+    from tests._constants import EXECUTION_PROFILE_KWARGS
+
+    report = replace(
+        ReviewLoopReport(target="HEAD", base="main"),
+        profile=ExecutionProfile(**EXECUTION_PROFILE_KWARGS),
+    )
+    data = json.loads(loop_to_json(report))
+    assert data["profile"]["brain_backend"] == "claude"
+
+
+def test_to_json_profile_defaults_to_none():
+    data = json.loads(to_json(_report()))
+    assert data["profile"] is None

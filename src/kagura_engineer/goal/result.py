@@ -7,8 +7,12 @@ first issue that did not reach OK, or OK if every issue produced a PR).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from ..run.result import RunReport, RunStatus
+
+if TYPE_CHECKING:
+    from ..profile import ExecutionProfile
 
 
 @dataclass(frozen=True)
@@ -19,6 +23,9 @@ class GoalReport:
     detail: str = ""
     resume_hint: str | None = None
     duration_s: float = 0.0
+    # issue #70: the resolved ExecutionProfile (per-config, shared by every
+    # issue in the milestone) — attached by the CLI, serialised by to_json.
+    profile: ExecutionProfile | None = None
 
     @property
     def completed(self) -> int:

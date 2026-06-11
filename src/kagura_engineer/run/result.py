@@ -17,6 +17,10 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..profile import ExecutionProfile
 
 
 class RunStatus(enum.Enum):
@@ -54,6 +58,9 @@ class RunReport:
     worktree: str | None = None
     resume_hint: str | None = None
     duration_s: float = 0.0
+    # issue #70: the resolved ExecutionProfile this run executed with —
+    # attached by the CLI (dataclasses.replace) and serialised by render.to_json.
+    profile: ExecutionProfile | None = None
 
     @property
     def status(self) -> RunStatus:

@@ -10,6 +10,7 @@ import json
 from rich.console import Console
 from rich.table import Table
 
+from ..profile import to_dict as _profile_dict
 from .result import ArmRun, ArmStats, EvalReport
 
 _VERDICT_ICON = {
@@ -58,6 +59,7 @@ def to_json(report: EvalReport) -> str:
     return json.dumps(
         {
             "issues": report.issues,
+            "profile": _profile_dict(report.profile) if report.profile else None,
             "grounded": _stats_to_dict(report.grounded_stats),
             "control": _stats_to_dict(report.control_stats),
             "uplift": {

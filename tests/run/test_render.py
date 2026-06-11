@@ -31,3 +31,20 @@ def test_print_table_smoke(capsys):
     print_table(RunReport(issue=1, phases=[PhaseResult("ship", RunStatus.OK, "PR opened")], pr_url="https://x/pull/1"))
     out = capsys.readouterr().out
     assert "ship" in out
+
+
+def test_to_json_carries_profile():
+    # issue #70: a report carrying an ExecutionProfile serialises it under
+    # the top-level "profile" key (the to_dict form).
+    from kagura_engineer.profile import ExecutionProfile
+    from tests._constants import EXECUTION_PROFILE_KWARGS
+
+    report = RunReport(issue=1, profile=ExecutionProfile(**EXECUTION_PROFILE_KWARGS))
+    data = json.loads(to_json(report))
+    assert data["profile"]["brain_backend"] == "claude"
+    assert data["profile"]["memory_backend"] == "cloud"
+
+
+def test_to_json_profile_defaults_to_none():
+    data = json.loads(to_json(RunReport(issue=1)))
+    assert data["profile"] is None

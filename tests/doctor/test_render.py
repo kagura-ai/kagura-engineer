@@ -29,3 +29,15 @@ def test_to_json_keeps_non_ascii():
     r = [CheckResult("memory-cloud", Status.OK, "到達 https://例え.jp")]
     out = render.to_json(r)
     assert "到達" in out
+
+
+def test_to_json_carries_profile_object():
+    # issue #70: `doctor --json` gains a top-level "profile" object.
+    prof = {"brain_backend": "claude", "memory_backend": "cloud"}
+    out = json.loads(render.to_json([CheckResult("git", Status.OK, "ok")], profile=prof))
+    assert out["profile"] == prof
+
+
+def test_to_json_profile_defaults_to_none():
+    out = json.loads(render.to_json([CheckResult("git", Status.OK, "ok")]))
+    assert out["profile"] is None

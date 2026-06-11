@@ -804,6 +804,40 @@ def test_progress_sink_emits_blocked_line_on_halt(monkeypatch):
     assert any("⏸" in l and "start" in l and "red" in l for l in lines), lines
 
 
+# --- issue #70: grounding-evidence progress line -----------------------------
+
+
+def test_grounding_evidence_line_streams_real_counts(monkeypatch):
+    # The startup header proves intent; this line proves what actually
+    # happened: the real pinned/recalled counts and the exact context id.
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+    lines: list[str] = []
+    run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"),
+             progress=lines.append)
+    # _FakeMemory grounds with 1 pinned + 1 recalled memory.
+    assert (
+        f"grounding: pinned 1 + recalled 1 from context {VALID_CONTEXT_UUID}"
+        in lines
+    ), lines
+
+
+def test_grounding_evidence_disabled_form_in_control_arm(monkeypatch):
+    # The eval control arm pulls no grounding — the evidence line must say so
+    # honestly instead of claiming zero-count grounding happened.
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+    lines: list[str] = []
+    run_idea(_cfg(), 42, ground=False, memory=_FakeMemory(),
+             repo_root=Path("/repo"), progress=lines.append)
+    assert "grounding: none (recall disabled)" in lines, lines
+    assert not any(l.startswith("grounding: pinned") for l in lines)
+
+
 def test_progress_sink_is_optional(monkeypatch):
     # Default (no sink) must not crash — the run still produces a normal report.
     _patch_boundaries(monkeypatch, phases={

@@ -186,6 +186,7 @@ def run_idea(
     # is a hard FAIL (we do not run ungrounded), surfaced cleanly not as a crash.
     recalled_ids: list[str] = []
     recalled: list[tuple[str, str]] = []
+    pinned: list[str] = []
     grounding: list[str] = []
     try:
         # Control arm (ground=False): pull NO grounding — skip pinned/recall
@@ -223,6 +224,18 @@ def run_idea(
         # about which A/B arm produced it.
         detail = "grounding off (control arm)" + (" (resuming)" if resumed else "")
     _record(PhaseResult("recall", RunStatus.OK, detail))
+
+    # issue #70: run-time grounding evidence. The startup header proves intent;
+    # this proves what actually happened — the real pinned/recalled counts and
+    # the exact context they came from (the wrong-context incident made this
+    # invisible). Progress-only, so --json stdout is unaffected.
+    if ground:
+        _emit(
+            f"grounding: pinned {len(pinned)} + recalled {len(recalled)} "
+            f"from context {cfg.context_id or 'local'}"
+        )
+    else:
+        _emit("grounding: none (recall disabled)")
 
     # 1b. cheap resume: a prior run already shipped this issue → no-op (skip
     # worktree + the two 30-min phases). Keeps `goal` re-runs cheap after a

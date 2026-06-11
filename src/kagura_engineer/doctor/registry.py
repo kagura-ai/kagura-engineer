@@ -43,6 +43,10 @@ _CHECKS: list[tuple[str, callable]] = [
 # .mcp.json check (issue #36) is meaningless for it.
 _CLOUD_ONLY_CHECKS: list[tuple[str, callable]] = [
     ("memory-mcp", lambda c: checks.check_memory_mcp(Path.cwd())),
+    # issue #70: live-resolve config.context_id to its context NAME so a
+    # wildcard/stale binding pointing recall at the wrong context is caught
+    # pre-flight. Meaningless for the local backend (no cloud context).
+    ("memory-context", lambda c: checks.check_memory_context(c)),
 ]
 
 

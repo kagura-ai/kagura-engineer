@@ -55,6 +55,33 @@ def test_doctor_json_all_ok(write_cfg, monkeypatch):
     assert '"overall": "ok"' in result.stdout
 
 
+def test_doctor_prints_profile_block_above_table(write_cfg, monkeypatch):
+    # issue #70: doctor answers "what would run" before "is it healthy" — the
+    # resolved execution-profile block precedes the check table.
+    monkeypatch.setattr(
+        "kagura_engineer.cli.run_all",
+        lambda cfg: [CheckResult("git", Status.OK, "ok")],
+    )
+    result = runner.invoke(app, ["doctor", "--config", str(write_cfg)])
+    assert result.exit_code == 0
+    assert "brain: claude" in result.stdout
+    assert "memory: cloud" in result.stdout
+    assert result.stdout.index("brain: claude") < result.stdout.index("doctor")
+
+
+def test_doctor_json_carries_profile(write_cfg, monkeypatch):
+    import json
+    monkeypatch.setattr(
+        "kagura_engineer.cli.run_all",
+        lambda cfg: [CheckResult("git", Status.OK, "ok")],
+    )
+    result = runner.invoke(app, ["doctor", "--config", str(write_cfg), "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)
+    assert data["profile"]["brain_backend"] == "claude"
+    assert data["profile"]["memory_backend"] == "cloud"
+
+
 def test_doctor_exit_1_on_fail(write_cfg, monkeypatch):
     monkeypatch.setattr(
         "kagura_engineer.cli.run_all",
@@ -542,6 +569,150 @@ def test_goal_unattended_flag_threads(monkeypatch, tmp_path):
     r = runner.invoke(app, ["goal", "v0.3", "-c", str(cfg), "--unattended"])
     assert r.exit_code == 0
     assert seen.get("unattended") is True
+
+
+# --- issue #70: execution-profile startup headers + JSON "profile" ----------
+
+
+def test_run_prints_profile_header(write_cfg, monkeypatch):
+    from kagura_engineer.run.result import RunStatus
+    monkeypatch.setattr("kagura_engineer.cli.run_idea",
+                        lambda *a, **kw: _stub_run_report(RunStatus.OK))
+    result = runner.invoke(app, ["run", "42", "--config", str(write_cfg)])
+    assert result.exit_code == 0
+    assert "brain: claude" in result.stdout
+    assert "memory: cloud" in result.stdout
+
+
+def test_run_json_carries_profile_without_header(write_cfg, monkeypatch):
+    import json
+    from kagura_engineer.run.result import RunStatus
+    monkeypatch.setattr("kagura_engineer.cli.run_idea",
+                        lambda *a, **kw: _stub_run_report(RunStatus.OK))
+    result = runner.invoke(app, ["run", "42", "--config", str(write_cfg), "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)  # parses → no header lines leaked
+    assert data["profile"]["brain_backend"] == "claude"
+    assert data["profile"]["context_id"]
+
+
+def test_goal_prints_profile_header(monkeypatch, tmp_path):
+    import kagura_engineer.cli as cli
+    from kagura_engineer.goal.result import GoalReport
+    from kagura_engineer.run.result import RunStatus
+    monkeypatch.setattr(cli, "run_milestone",
+                        lambda cfg, m, **kw: GoalReport(milestone=m, status=RunStatus.OK),
+                        raising=True)
+    cfg = _write_cfg_review(tmp_path)
+    result = runner.invoke(app, ["goal", "v0.3", "-c", str(cfg)])
+    assert result.exit_code == 0
+    assert "brain: claude" in result.stdout
+
+
+def test_goal_json_carries_profile(monkeypatch, tmp_path):
+    import json as _json
+    import kagura_engineer.cli as cli
+    from kagura_engineer.goal.result import GoalReport
+    from kagura_engineer.run.result import RunStatus
+    monkeypatch.setattr(cli, "run_milestone",
+                        lambda cfg, m, **kw: GoalReport(milestone=m, status=RunStatus.OK),
+                        raising=True)
+    cfg = _write_cfg_review(tmp_path)
+    result = runner.invoke(app, ["goal", "v0.3", "-c", str(cfg), "--json"])
+    assert result.exit_code == 0
+    data = _json.loads(result.stdout)
+    assert data["profile"]["brain_backend"] == "claude"
+
+
+def _patch_review_pr_green(monkeypatch):
+    import kagura_engineer.cli as cli
+    from kagura_engineer.review.result import ReviewReport, ReviewStatus
+    monkeypatch.setattr(
+        cli, "review_pr",
+        lambda cfg, target, **kw: ReviewReport(target=target, base="main",
+                                               status=ReviewStatus.OK, verdict="green"),
+        raising=True,
+    )
+
+
+def test_review_header_omits_brain_line_without_fix(monkeypatch, tmp_path):
+    # Plain `review` runs no brain — the header must not imply one.
+    _patch_review_pr_green(monkeypatch)
+    cfg = _write_cfg_review(tmp_path)
+    result = runner.invoke(app, ["review", "HEAD", "-c", str(cfg)])
+    assert result.exit_code == 0
+    assert "reviewer:" in result.stdout
+    assert "memory: cloud" in result.stdout
+    assert "brain:" not in result.stdout
+
+
+def test_review_fix_header_includes_brain_line(monkeypatch, tmp_path):
+    import kagura_engineer.cli as cli
+    from kagura_engineer.review.result import ReviewLoopReport, ReviewStatus
+    monkeypatch.setattr(
+        cli, "review_fix_loop",
+        lambda cfg, target, **kw: ReviewLoopReport(target=target, base="main",
+                                                   status=ReviewStatus.OK),
+        raising=True,
+    )
+    cfg = _write_cfg_review(tmp_path)
+    result = runner.invoke(app, ["review", "HEAD", "-c", str(cfg), "--fix"])
+    assert result.exit_code == 0
+    assert "brain: claude" in result.stdout
+
+
+def test_review_json_carries_profile(monkeypatch, tmp_path):
+    import json as _json
+    _patch_review_pr_green(monkeypatch)
+    cfg = _write_cfg_review(tmp_path)
+    result = runner.invoke(app, ["review", "HEAD", "-c", str(cfg), "--json"])
+    assert result.exit_code == 0
+    data = _json.loads(result.stdout)
+    assert data["profile"]["brain_backend"] == "claude"
+
+
+def test_review_fix_json_carries_profile(monkeypatch, tmp_path):
+    import json as _json
+    import kagura_engineer.cli as cli
+    from kagura_engineer.review.result import ReviewLoopReport, ReviewStatus
+    monkeypatch.setattr(
+        cli, "review_fix_loop",
+        lambda cfg, target, **kw: ReviewLoopReport(target=target, base="main",
+                                                   status=ReviewStatus.OK),
+        raising=True,
+    )
+    cfg = _write_cfg_review(tmp_path)
+    result = runner.invoke(app, ["review", "HEAD", "-c", str(cfg), "--fix", "--json"])
+    assert result.exit_code == 0
+    data = _json.loads(result.stdout)
+    assert data["profile"]["brain_backend"] == "claude"
+
+
+def _stub_eval_report():
+    from kagura_engineer.eval.result import EvalReport
+    return EvalReport(issues=[1], grounded_runs=[], control_runs=[])
+
+
+def test_eval_prints_profile_header(monkeypatch, tmp_path):
+    import kagura_engineer.cli as cli
+    monkeypatch.setattr(cli, "run_ab_eval",
+                        lambda *a, **kw: _stub_eval_report(), raising=True)
+    cfg = _write_cfg_review(tmp_path)
+    result = runner.invoke(app, ["eval", "1", "-c", str(cfg)])
+    assert result.exit_code == 0
+    assert "brain: claude" in result.stdout
+
+
+def test_eval_json_carries_profile(monkeypatch, tmp_path):
+    import json as _json
+    import kagura_engineer.cli as cli
+    monkeypatch.setattr(cli, "run_ab_eval",
+                        lambda *a, **kw: _stub_eval_report(), raising=True)
+    cfg = _write_cfg_review(tmp_path)
+    result = runner.invoke(app, ["eval", "1", "-c", str(cfg), "--json"])
+    assert result.exit_code == 0
+    data = _json.loads(result.stdout)
+    assert data["profile"]["brain_backend"] == "claude"
 
 
 # --- init: scaffold repo.yaml + .gitignore (issue #35) ------------------------
