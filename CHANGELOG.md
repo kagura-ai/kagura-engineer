@@ -8,6 +8,17 @@ While the project is in `0.x`, minor versions may carry breaking changes.
 
 ## [Unreleased]
 
+## [0.3.3] — 2026-06-11
+
+### Fixed
+
+- Windows (cp932 / non-UTF-8 locale): `init`, `doctor`, `setup`, and the review
+  loop no longer crash with `UnicodeDecodeError` when a text file (`.gitignore`,
+  `repo.yaml`, the reviewer envelope, credential caches) contains bytes that are
+  valid UTF-8 but invalid in the OS-default codec. All text file reads and writes
+  now pin `encoding="utf-8"` instead of the locale default. Reported from a
+  PowerShell `kagura-engineer init` on Japanese Windows.
+
 ## [0.3.2] — 2026-06-11
 
 ### Added
