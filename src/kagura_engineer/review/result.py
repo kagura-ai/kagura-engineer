@@ -16,7 +16,10 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ..profile import ExecutionProfile
 
 
 class ReviewStatus(enum.Enum):
@@ -46,6 +49,9 @@ class ReviewReport:
     resume_hint: str | None = None
     report_path: str | None = None
     duration_s: float = 0.0
+    # issue #70: the resolved ExecutionProfile — attached by the CLI,
+    # serialised by render.to_json.
+    profile: ExecutionProfile | None = None
 
 
 @dataclass(frozen=True)
@@ -66,6 +72,8 @@ class ReviewLoopReport:
     detail: str = ""
     resume_hint: str | None = None
     duration_s: float = 0.0
+    # issue #70: see ReviewReport.profile.
+    profile: ExecutionProfile | None = None
 
     @property
     def final(self) -> ReviewReport | None:

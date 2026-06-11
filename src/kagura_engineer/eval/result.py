@@ -15,8 +15,12 @@ launching a real run.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from ..run.result import RunStatus
+
+if TYPE_CHECKING:
+    from ..profile import ExecutionProfile
 
 
 @dataclass(frozen=True)
@@ -152,6 +156,9 @@ class EvalReport:
     grounded_runs: list[ArmRun] = field(default_factory=list)
     control_runs: list[ArmRun] = field(default_factory=list)
     duration_s: float = 0.0
+    # issue #70: the resolved ExecutionProfile both arms ran with — attached
+    # by the CLI, serialised by render.to_json.
+    profile: ExecutionProfile | None = None
 
     @property
     def grounded_stats(self) -> ArmStats:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+from dataclasses import replace
 from pathlib import Path
 
 import typer
@@ -13,6 +15,9 @@ from .config import (
     load_config,
     load_config_lenient,
 )
+from .profile import render_lines as profile_lines
+from .profile import resolve_profile
+from .profile import to_dict as profile_dict
 from .doctor.registry import overall_status, run_all
 from .eval import ReviewFn, run_ab_eval
 from .eval.render import print_table as eval_print_table
@@ -40,6 +45,15 @@ from .setup.scaffold import scaffold
 app = typer.Typer(help="Autonomous coding harness over Claude Code + Kagura Memory.")
 
 _CONFIG_OPT = typer.Option("repo.yaml", "--config", "-c", help="path to repo.yaml")
+
+
+def _echo_profile(prof, json_out: bool, *, brain: bool = True) -> None:
+    """issue #70: print the execution-profile header (suppressed under --json
+    so stdout stays a single valid JSON document — the issue #12 rule)."""
+    if json_out:
+        return
+    for line in profile_lines(prof, brain=brain):
+        typer.echo(line)
 
 
 def _version_callback(value: bool) -> None:
@@ -90,16 +104,31 @@ def doctor(
 
     On a missing/invalid config (a fresh checkout) doctor degrades instead of
     refusing: a synthetic `config` FAIL row plus the config-free checks, exiting
-    non-zero (1) so "unhealthy → non-zero" is preserved (issue #71).
+    non-zero (1) so "unhealthy → non-zero" is preserved (issue #71). With a
+    valid config it also resolves and prints the execution profile up-front, so
+    doctor answers "what would run" before "is it healthy" (issue #70).
     """
     load = load_config_lenient(config)
-    if load.cfg is not None:
-        results = run_all(load.cfg)
-    else:
+    prof = None
+    if load.cfg is None:
         # Degraded report: headline config row first, then config-free checks.
         results = [_degraded_config_check(load), *run_all(None)]
+    else:
+        # issue #70: resolve the execution profile up-front. resolve_profile
+        # raises only ConfigError (codex half-pair); degrade like an invalid
+        # config rather than crashing on it.
+        try:
+            prof = resolve_profile(load.cfg, os.environ, Path.cwd())
+        except ConfigError as exc:
+            degraded = ConfigLoad(cfg=None, error=str(exc), missing=False)
+            results = [_degraded_config_check(degraded), *run_all(None)]
+        else:
+            _echo_profile(prof, json_out)
+            results = run_all(load.cfg)
     if json_out:
-        typer.echo(to_json(results))
+        typer.echo(to_json(
+            results, profile=profile_dict(prof) if prof is not None else None
+        ))
     else:
         print_table(results)
     if overall_status(results) is Status.FAIL:
@@ -352,6 +381,7 @@ def run(
     """
     try:
         cfg = load_config(config)
+        prof = resolve_profile(cfg, os.environ, Path.cwd())
     except ConfigError as exc:
         typer.echo(f"run: invalid config '{config}': {exc}", err=True)
         raise typer.Exit(code=2)
@@ -360,8 +390,13 @@ def run(
     # long autonomous run is not a blank screen until the final table. Suppressed
     # under --json so stdout stays clean, machine-parseable JSON.
     progress = None if json_out else typer.echo
-    report = run_idea(cfg, issue, no_remember=no_remember, unattended=unattended,
-                      progress=progress)
+    # issue #70: announce the resolved execution profile before phase work.
+    _echo_profile(prof, json_out)
+    report = replace(
+        run_idea(cfg, issue, no_remember=no_remember, unattended=unattended,
+                 progress=progress),
+        profile=prof,
+    )
 
     if json_out:
         typer.echo(run_to_json(report))
@@ -396,19 +431,24 @@ def review(
     """
     try:
         cfg = load_config(config)
+        prof = resolve_profile(cfg, os.environ, Path.cwd())
     except ConfigError as exc:
         typer.echo(f"review: invalid config '{config}': {exc}", err=True)
         raise typer.Exit(code=2)
 
+    # issue #70: without --fix no brain runs, so the brain line is shown only
+    # when the fix loop is active.
+    _echo_profile(prof, json_out, brain=fix)
+
     if fix:
-        loop_report = review_fix_loop(cfg, target, base=base)
+        loop_report = replace(review_fix_loop(cfg, target, base=base), profile=prof)
         if json_out:
             typer.echo(review_loop_to_json(loop_report))
         else:
             review_print_loop_table(loop_report)
         raise typer.Exit(code=REVIEW_STATUS_EXIT[loop_report.status])
 
-    report = review_pr(cfg, target, base=base)
+    report = replace(review_pr(cfg, target, base=base), profile=prof)
 
     if json_out:
         typer.echo(review_to_json(report))
@@ -449,6 +489,7 @@ def goal(
     """
     try:
         cfg = load_config(config)
+        prof = resolve_profile(cfg, os.environ, Path.cwd())
     except ConfigError as exc:
         typer.echo(f"goal: invalid config '{config}': {exc}", err=True)
         raise typer.Exit(code=2)
@@ -456,8 +497,13 @@ def goal(
     # issue #12: per-issue phase progress to stdout (suppressed under --json),
     # so a multi-issue milestone is not silent until the final table.
     progress = None if json_out else typer.echo
-    report = run_milestone(cfg, milestone, no_remember=no_remember,
-                           unattended=unattended, progress=progress)
+    # issue #70: the profile is per-config, not per-issue — print once up-front.
+    _echo_profile(prof, json_out)
+    report = replace(
+        run_milestone(cfg, milestone, no_remember=no_remember,
+                      unattended=unattended, progress=progress),
+        profile=prof,
+    )
 
     if json_out:
         typer.echo(goal_to_json(report))
@@ -513,11 +559,14 @@ def eval(
     """
     try:
         cfg = load_config(config)
+        prof = resolve_profile(cfg, os.environ, Path.cwd())
     except ConfigError as exc:
         typer.echo(f"eval: invalid config '{config}': {exc}", err=True)
         raise typer.Exit(code=2)
 
     progress = None if json_out else typer.echo
+    # issue #70: both arms share one profile — print it once up-front.
+    _echo_profile(prof, json_out)
 
     # The grounded/control arms differ by exactly one variable: run_idea's `ground`
     # (memory READ). Memory WRITE is held constant OFF for BOTH arms via
@@ -545,7 +594,10 @@ def eval(
             return review_fix_loop(cfg, target, base="main")
         review_fn = _review_fn
 
-    report = run_ab_eval(issues, _run_fn, review_fn=review_fn, progress=progress)
+    report = replace(
+        run_ab_eval(issues, _run_fn, review_fn=review_fn, progress=progress),
+        profile=prof,
+    )
 
     if json_out:
         typer.echo(eval_to_json(report))

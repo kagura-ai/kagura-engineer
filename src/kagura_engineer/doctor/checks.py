@@ -349,6 +349,73 @@ def check_memory_mcp(
     )
 
 
+def _fetch_context_info(cfg) -> "object":
+    """Live-resolve `cfg.context_id` via the memory SDK's `get_context_info`.
+
+    The SDK is async; bridge on a throwaway loop (this is a one-shot doctor
+    probe, not the run loop's persistent client). Errors propagate — the
+    caller (check_memory_context) degrades them to FAIL.
+    """
+    import asyncio
+
+    import kagura_memory
+
+    from ..run.memory import _mcp_url
+
+    sdk = kagura_memory.KaguraClient(
+        api_key=os.environ.get("KAGURA_API_KEY"),
+        mcp_url=_mcp_url(cfg.memory_cloud_url),
+    )
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(sdk.get_context_info(cfg.context_id))
+    finally:
+        try:
+            closer = getattr(sdk, "close", None)
+            if closer is not None:
+                loop.run_until_complete(closer())
+        except Exception:  # noqa: BLE001 — teardown is best-effort
+            pass
+        loop.close()
+
+
+_CONTEXT_ID_HINT = "check config.context_id (and that it belongs to your workspace)"
+
+
+def check_memory_context(cfg, *, fetch=_fetch_context_info) -> CheckResult:
+    """Verify `cfg.context_id` resolves to a real, accessible context and show
+    its NAME (issue #70) — the wrong-context-recall incident detector.
+
+    Cloud-only (the registry skips it for memory_backend=local). Never raises:
+    SDK/network/auth errors degrade to FAIL with the error string, mirroring
+    check_memory_cloud's taxonomy. `fetch` is injectable for tests.
+    """
+    try:
+        info = fetch(cfg)
+    except Exception as exc:  # noqa: BLE001 — degrade every SDK leak to FAIL
+        return CheckResult(
+            "memory-context",
+            Status.FAIL,
+            f"could not resolve context {cfg.context_id}: {exc}",
+            _CONTEXT_ID_HINT,
+        )
+    detail_ctx = getattr(info, "context", None)
+    name = (
+        getattr(detail_ctx, "display_name", None)
+        or getattr(detail_ctx, "name", None)
+    )
+    if not name:
+        return CheckResult(
+            "memory-context",
+            Status.FAIL,
+            f"context {cfg.context_id} resolved without a usable name",
+            _CONTEXT_ID_HINT,
+        )
+    return CheckResult(
+        "memory-context", Status.OK, f'context {cfg.context_id} → "{name}"'
+    )
+
+
 def check_local_memory(path: str) -> CheckResult:
     """Verify the offline SQLite memory backend (Plan 5) can be created and
     written at `path` — the local counterpart to the cloud reachability probe."""

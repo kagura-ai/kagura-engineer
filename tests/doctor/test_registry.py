@@ -19,6 +19,7 @@ def test_run_all_invokes_every_check(monkeypatch, valid_config):
     monkeypatch.setattr(registry.checks, "check_haiku", _stub("haiku"))
     monkeypatch.setattr(registry.checks, "check_memory_cloud", _stub("memory-cloud"))
     monkeypatch.setattr(registry.checks, "check_memory_mcp", _stub("memory-mcp"))
+    monkeypatch.setattr(registry.checks, "check_memory_context", _stub("memory-context"))
     monkeypatch.setattr(registry.checks, "check_gh_issue_driven", _stub("gh-issue-driven"))
 
     results = registry.run_all(valid_config)
@@ -30,9 +31,10 @@ def test_run_all_invokes_every_check(monkeypatch, valid_config):
         "haiku",
         "memory-cloud",
         "memory-mcp",
+        "memory-context",
         "gh-issue-driven",
     }
-    assert len(calls) == 8
+    assert len(calls) == 9
 
 
 def test_overall_status_is_worst():
@@ -91,6 +93,11 @@ def test_run_all_isolates_check_exceptions(monkeypatch, valid_config):
     )
     monkeypatch.setattr(
         registry.checks,
+        "check_memory_context",
+        lambda *a, **k: CheckResult("memory-context", Status.OK, "ok"),
+    )
+    monkeypatch.setattr(
+        registry.checks,
         "check_gh_issue_driven",
         lambda: CheckResult("gh-issue-driven", Status.OK, "ok"),
     )
@@ -109,6 +116,7 @@ def test_run_all_isolates_check_exceptions(monkeypatch, valid_config):
         "haiku",
         "memory-cloud",
         "memory-mcp",
+        "memory-context",
         "gh-issue-driven",
     }
     assert all(
@@ -198,3 +206,22 @@ def test_run_all_uses_local_memory_check_when_backend_local(monkeypatch, valid_c
     # The MCP-config check is cloud-only: the offline SQLite backend has no
     # MCP memory server, so no memory-mcp row appears for a local repo.
     assert not any(r.name == "memory-mcp" for r in results)
+    # Same for the context-resolution check (issue #70): a local backend has
+    # no cloud context to resolve, so the check is skipped entirely.
+    assert not any(r.name == "memory-context" for r in results)
+
+
+def test_memory_context_check_is_in_cloud_plan(monkeypatch, valid_config):
+    # issue #70: the wrong-context detector runs for the cloud backend.
+    monkeypatch.setattr(
+        registry.checks,
+        "check_memory_context",
+        lambda *a, **k: CheckResult("memory-context", Status.OK, "ok"),
+    )
+    for name in ("check_git", "check_claude_code", "check_gh", "check_ollama",
+                 "check_haiku", "check_memory_cloud", "check_memory_mcp",
+                 "check_gh_issue_driven"):
+        monkeypatch.setattr(registry.checks, name,
+                            lambda *a, **k: CheckResult("x", Status.OK, "ok"))
+    results = registry.run_all(valid_config)
+    assert any(r.name == "memory-context" for r in results)

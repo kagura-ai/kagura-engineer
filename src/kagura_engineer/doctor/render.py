@@ -15,10 +15,13 @@ _ICON: dict[Status, str] = {
 }
 
 
-def to_json(results: list[CheckResult]) -> str:
+def to_json(results: list[CheckResult], profile: dict | None = None) -> str:
+    # `profile` (issue #70) is the resolved ExecutionProfile dict the CLI
+    # passes; kept optional so the renderer stays usable without one.
     return json.dumps(
         {
             "overall": overall_status(results).value,
+            "profile": profile,
             "checks": [
                 {
                     "name": r.name,

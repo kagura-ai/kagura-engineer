@@ -53,6 +53,10 @@ _CHECKS: list[tuple[str, callable, bool]] = [
 # definition (the backend is a config field), so omitted from run_all(None).
 _CLOUD_ONLY_CHECKS: list[tuple[str, callable, bool]] = [
     ("memory-mcp", lambda c: checks.check_memory_mcp(Path.cwd()), True),
+    # issue #70: live-resolve config.context_id to its context NAME so a
+    # wildcard/stale binding pointing recall at the wrong context is caught
+    # pre-flight. Meaningless for the local backend (no cloud context).
+    ("memory-context", lambda c: checks.check_memory_context(c), True),
 ]
 
 

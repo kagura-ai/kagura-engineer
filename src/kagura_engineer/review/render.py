@@ -6,6 +6,7 @@ import json
 from rich.console import Console
 from rich.table import Table
 
+from ..profile import to_dict_or_none as _profile_dict
 from .result import Finding, ReviewLoopReport, ReviewReport, ReviewStatus
 
 _ICON: dict[ReviewStatus, str] = {
@@ -30,6 +31,7 @@ def _report_to_dict(report: ReviewReport) -> dict:
         "target": report.target,
         "base": report.base,
         "status": report.status.value,
+        "profile": _profile_dict(report.profile),
         "verdict": report.verdict,
         "summary": report.summary,
         "findings": [_finding_to_dict(f) for f in report.findings],
@@ -50,6 +52,7 @@ def loop_to_json(report: ReviewLoopReport) -> str:
             "target": report.target,
             "base": report.base,
             "status": report.status.value,
+            "profile": _profile_dict(report.profile),
             "fixes_attempted": report.fixes_attempted,
             "detail": report.detail,
             "resume_hint": report.resume_hint,

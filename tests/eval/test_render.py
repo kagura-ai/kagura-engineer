@@ -55,3 +55,20 @@ def test_print_table_runs_without_error(capsys):
     assert "grounded" in out.lower()
     assert "control" in out.lower()
     assert "improved" in out.lower()   # the headline verdict is shown
+
+
+def test_to_json_carries_profile():
+    # issue #70: the A/B eval report serialises its ExecutionProfile.
+    from dataclasses import replace
+
+    from kagura_engineer.profile import ExecutionProfile
+    from tests._constants import EXECUTION_PROFILE_KWARGS
+
+    report = replace(_report(), profile=ExecutionProfile(**EXECUTION_PROFILE_KWARGS))
+    data = json.loads(to_json(report))
+    assert data["profile"]["brain_backend"] == "claude"
+
+
+def test_to_json_profile_defaults_to_none():
+    data = json.loads(to_json(_report()))
+    assert data["profile"] is None
