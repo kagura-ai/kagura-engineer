@@ -126,13 +126,21 @@ def _check_fix_name(only: str | None, plan: list[str]) -> str | None:
     return None
 
 
-def _setup_config_step(load: ConfigLoad, scaffold_error: str | None = None) -> StepResult:
+def _setup_config_step(
+    load: ConfigLoad, scaffold_error: str | None = None, *, scaffolded: bool = False
+) -> StepResult:
     """Synthetic `config` step for setup's degraded plan (issue #71).
 
-    Normally NEEDS_USER (not FAIL): the user must supply something (typically
-    the blank cloud creds of the fresh template) before the config-dependent
-    steps can run. The hint derives its field list from CLOUD_REQUIRED_FIELDS —
-    the same SSOT the `init` next-step wording uses, so the two never drift.
+    Normally NEEDS_USER (not FAIL): the user must supply something before the
+    config-dependent steps can run. What that something is depends on how we
+    got here: on the fresh-checkout path (`missing`, or `scaffolded` — the
+    file was just written from the template, so its blockers are the blank
+    cloud creds) the hint names the credentials, derived from
+    CLOUD_REQUIRED_FIELDS — the same SSOT the `init` next-step wording uses,
+    so the two never drift. A pre-existing repo.yaml that fails to load could
+    be broken in any way (syntax, validation), so the hint says to fix it —
+    mirroring doctor's `_degraded_config_check` wording — and the detail field
+    carries the actual error.
 
     When auto-scaffold itself failed (an unwritable dir), the step is FAIL
     instead — a hard error the user must clear before anything can proceed.
@@ -144,11 +152,14 @@ def _setup_config_step(load: ConfigLoad, scaffold_error: str | None = None) -> S
             scaffold_error,
             fix_hint="make the directory writable, then re-run `kagura-engineer setup`",
         )
-    creds = ", ".join(CLOUD_REQUIRED_FIELDS)
-    hint = (
-        f"fill in the cloud credentials ({creds}) in repo.yaml, "
-        "then re-run `kagura-engineer setup`"
-    )
+    if load.missing or scaffolded:
+        creds = ", ".join(CLOUD_REQUIRED_FIELDS)
+        hint = (
+            f"fill in the cloud credentials ({creds}) in repo.yaml, "
+            "then re-run `kagura-engineer setup`"
+        )
+    else:
+        hint = "fix repo.yaml, then re-run `kagura-engineer setup`"
     return StepResult(
         "config",
         StepStatus.NEEDS_USER,
@@ -257,6 +268,7 @@ def setup(
     # command a new checkout has to type — then re-load. Suppressed under
     # --dry-run, where a preview must not write to disk.
     scaffold_error: str | None = None
+    scaffolded = False
     if load.cfg is None and load.missing and not dry_run:
         try:
             scaffold(Path(config).parent)
@@ -267,6 +279,10 @@ def setup(
             typer.echo(
                 f"{config} not found — scaffolding one (same as 'kagura-engineer init')"
             )
+            # After the re-load `missing` flips False (the file now exists),
+            # but the right hint is still the template's blank creds — carry
+            # the fact that we just scaffolded into the synthetic config step.
+            scaffolded = True
             load = load_config_lenient(config)
 
     # Validate --fix before running anything.
@@ -288,7 +304,7 @@ def setup(
             dry_run=dry_run,
             only=fix,
             full=full,
-            config_step=_setup_config_step(load, scaffold_error),
+            config_step=_setup_config_step(load, scaffold_error, scaffolded=scaffolded),
         )
 
     if json_out:

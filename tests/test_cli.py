@@ -221,6 +221,9 @@ def test_setup_missing_config_auto_scaffolds_and_degrades(monkeypatch):
     # NEEDS_USER (no FAIL) → exit 2, with a table naming the next action.
     assert result.exit_code == 2
     assert "config" in result.output.lower()
+    # The freshly-scaffolded template's blockers are its blank cloud creds —
+    # the hint must point at them.
+    assert "cloud credentials" in captured["config_step"].fix_hint
 
 
 def test_setup_invalid_config_degrades_without_scaffold(tmp_path, monkeypatch):
@@ -235,6 +238,21 @@ def test_setup_invalid_config_degrades_without_scaffold(tmp_path, monkeypatch):
     assert captured["config_step"] is not None
     assert result.exit_code == 2
     assert "config" in result.output.lower()
+
+
+def test_setup_invalid_config_hint_says_fix_not_creds(tmp_path, monkeypatch):
+    # An existing-but-invalid repo.yaml is not the blank-creds template: the
+    # failure may be a syntax error or any validation problem, so the hint must
+    # say "fix repo.yaml" (mirroring doctor's wording), not point at cloud
+    # credentials the user may already have filled in.
+    captured = {}
+    monkeypatch.setattr("kagura_engineer.cli.run_plan", _spy_run_plan(captured))
+    bad = tmp_path / "repo.yaml"
+    bad.write_text("repo: [broken\n")  # YAML syntax error, unrelated to creds
+    runner.invoke(app, ["setup", "--config", str(bad)])
+    hint = captured["config_step"].fix_hint
+    assert "fix repo.yaml" in hint
+    assert "cloud credentials" not in hint
 
 
 def test_setup_dry_run_suppresses_scaffold(monkeypatch):

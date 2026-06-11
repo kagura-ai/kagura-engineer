@@ -180,7 +180,9 @@ kagura-engineer doctor --json
 kagura-engineer doctor -c path/to/repo.yaml
 ```
 
-Exit codes: `0` all OK/WARN · `1` any FAIL · `2` config error.
+Exit codes: `0` all OK/WARN · `1` any FAIL. A missing/invalid `repo.yaml` no
+longer refuses with exit 2: doctor degrades to a synthetic `config` FAIL row
+plus the config-free checks, and exits `1`.
 
 ### `kagura-engineer setup`
 
