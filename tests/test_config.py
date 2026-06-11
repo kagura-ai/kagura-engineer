@@ -267,3 +267,78 @@ def test_brain_backend_rejects_unknown_value():
 def test_unknown_brain_key_still_forbidden():
     with pytest.raises(ValidationError):  # extra="forbid" rejects the typo'd key
         Config.model_validate({**_minimal_local(), "brain_backendd": "codex"})
+
+
+# --- load_config_lenient (issue #71) -----------------------------------
+# The first-install seam: doctor/setup need to operate on a missing/invalid
+# config instead of refusing. load_config_lenient never raises; it reports
+# (cfg, error, missing) so callers can degrade gracefully.
+
+
+def test_lenient_valid_config_returns_cfg(write_cfg):
+    from kagura_engineer.config import load_config_lenient
+
+    load = load_config_lenient(write_cfg)
+    assert load.cfg is not None
+    assert load.cfg.profile == VALID_PROFILE
+    assert load.error is None
+    assert load.missing is False
+
+
+def test_lenient_missing_file_flags_missing(tmp_path):
+    from kagura_engineer.config import load_config_lenient
+
+    load = load_config_lenient(tmp_path / "repo.yaml")
+    assert load.cfg is None
+    assert load.missing is True
+    # The error carries the underlying ConfigError message (which points at init).
+    assert load.error is not None and "init" in load.error
+
+
+def test_lenient_invalid_creds_is_not_missing(tmp_path):
+    # A present-but-blank-creds cloud config (the fresh template) is invalid,
+    # not missing — this distinction drives setup's auto-scaffold decision.
+    from kagura_engineer.config import load_config_lenient
+
+    p = tmp_path / "repo.yaml"
+    p.write_text("profile: coding\n")  # cloud backend, blank creds → validation fail
+    load = load_config_lenient(p)
+    assert load.cfg is None
+    assert load.missing is False
+    assert load.error is not None
+
+
+def test_lenient_malformed_yaml_is_not_missing(tmp_path):
+    from kagura_engineer.config import load_config_lenient
+
+    p = tmp_path / "repo.yaml"
+    p.write_text("profile: coding\n\tbad: tab\n")  # tab → YAML scanner error
+    load = load_config_lenient(p)
+    assert load.cfg is None
+    assert load.missing is False
+    assert load.error is not None
+
+
+def test_lenient_unreadable_file_is_not_missing(tmp_path, monkeypatch, valid_repo_yaml_text):
+    from kagura_engineer.config import load_config_lenient
+
+    p = tmp_path / "repo.yaml"
+    p.write_text(valid_repo_yaml_text)
+
+    def _boom(self, *a, **k):
+        raise PermissionError("Permission denied")
+
+    monkeypatch.setattr(Path, "read_text", _boom)
+    load = load_config_lenient(p)
+    assert load.cfg is None
+    assert load.missing is False  # the file exists; it is just unreadable
+    assert load.error is not None
+
+
+def test_lenient_never_raises_on_directory(tmp_path):
+    # Belt-and-suspenders: even a pathological path must not raise.
+    from kagura_engineer.config import load_config_lenient
+
+    load = load_config_lenient(tmp_path)  # a directory, not a file
+    assert load.cfg is None
+    assert load.missing is True

@@ -187,22 +187,116 @@ def test_setup_unknown_fix_is_clean_error(write_cfg, monkeypatch):
     assert _check_fix_name("gh", build_plan(only="gh")) is None
 
 
-# --- config-error handling mirrors doctor -------------------------------
+# --- setup: first-install UX on missing/invalid config (issue #71) ----------
+# setup is the only command a fresh checkout needs: a missing repo.yaml is
+# auto-scaffolded, then setup runs a degraded plan (config NEEDS_USER + the
+# config-free steps) instead of refusing.
 
 
-def test_setup_missing_config_clean_error(tmp_path):
-    missing = tmp_path / "nope.yaml"
-    result = runner.invoke(app, ["setup", "--config", str(missing)])
+def _spy_run_plan(captured):
+    """A run_plan stub that records (cfg, config_step) and routes the config
+    step into its real status bucket so the exit-code path is exercised."""
+    def _spy(cfg, *, no_input, dry_run, only=None, full=False, config_step=None):
+        captured["cfg"] = cfg
+        captured["config_step"] = config_step
+        failed = [config_step] if (config_step and config_step.status is StepStatus.FAIL) else []
+        needs_user = [config_step] if (config_step and config_step.status is StepStatus.NEEDS_USER) else []
+        return SetupReport(failed=failed, needs_user=needs_user, duration_s=0.0)
+    return _spy
+
+
+def test_setup_missing_config_auto_scaffolds_and_degrades(monkeypatch):
+    captured = {}
+    monkeypatch.setattr("kagura_engineer.cli.run_plan", _spy_run_plan(captured))
+    with runner.isolated_filesystem():
+        result = runner.invoke(app, ["setup"])  # default --config repo.yaml
+        from pathlib import Path as _P
+        # The fresh checkout's repo.yaml was scaffolded (same as `init`).
+        assert _P("repo.yaml").is_file()
+    assert "scaffolding" in result.output.lower()
+    # Degraded mode: run_plan called with no config + a synthetic config step.
+    assert captured["cfg"] is None
+    assert captured["config_step"] is not None
+    assert captured["config_step"].status is StepStatus.NEEDS_USER
+    # NEEDS_USER (no FAIL) → exit 2, with a table naming the next action.
     assert result.exit_code == 2
     assert "config" in result.output.lower()
+    # The freshly-scaffolded template's blockers are its blank cloud creds —
+    # the hint must point at them.
+    assert "cloud credentials" in captured["config_step"].fix_hint
 
 
-def test_setup_invalid_config_clean_error(tmp_path):
+def test_setup_invalid_config_degrades_without_scaffold(tmp_path, monkeypatch):
+    captured = {}
+    monkeypatch.setattr("kagura_engineer.cli.run_plan", _spy_run_plan(captured))
     bad = tmp_path / "repo.yaml"
-    bad.write_text("profile: coding\n")
+    bad.write_text("profile: coding\n")  # present but blank creds → invalid
     result = runner.invoke(app, ["setup", "--config", str(bad)])
+    # An existing (invalid) file is not re-scaffolded.
+    assert "scaffolding" not in result.output.lower()
+    assert captured["cfg"] is None
+    assert captured["config_step"] is not None
     assert result.exit_code == 2
     assert "config" in result.output.lower()
+
+
+def test_setup_invalid_config_hint_says_fix_not_creds(tmp_path, monkeypatch):
+    # An existing-but-invalid repo.yaml is not the blank-creds template: the
+    # failure may be a syntax error or any validation problem, so the hint must
+    # say "fix repo.yaml" (mirroring doctor's wording), not point at cloud
+    # credentials the user may already have filled in.
+    captured = {}
+    monkeypatch.setattr("kagura_engineer.cli.run_plan", _spy_run_plan(captured))
+    bad = tmp_path / "repo.yaml"
+    bad.write_text("repo: [broken\n")  # YAML syntax error, unrelated to creds
+    runner.invoke(app, ["setup", "--config", str(bad)])
+    hint = captured["config_step"].fix_hint
+    assert "fix repo.yaml" in hint
+    assert "cloud credentials" not in hint
+
+
+def test_setup_dry_run_suppresses_scaffold(monkeypatch):
+    captured = {}
+    monkeypatch.setattr("kagura_engineer.cli.run_plan", _spy_run_plan(captured))
+    with runner.isolated_filesystem():
+        result = runner.invoke(app, ["setup", "--dry-run"])
+        from pathlib import Path as _P
+        # Preview must not write: no repo.yaml created under --dry-run.
+        assert not _P("repo.yaml").exists()
+    assert captured["cfg"] is None  # still degraded, just no scaffold
+    assert captured["config_step"] is not None
+    assert result.exit_code == 2
+
+
+def test_setup_scaffold_failure_is_config_fail_row(monkeypatch):
+    # An unwritable dir must surface as a `config` FAIL row, never a traceback.
+    captured = {}
+    monkeypatch.setattr("kagura_engineer.cli.run_plan", _spy_run_plan(captured))
+
+    def _boom(*a, **k):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr("kagura_engineer.cli.scaffold", _boom)
+    with runner.isolated_filesystem():
+        result = runner.invoke(app, ["setup"])
+    # The OSError was caught (only the clean typer.Exit/SystemExit remains).
+    assert not isinstance(result.exception, OSError)
+    assert captured["config_step"] is not None
+    assert captured["config_step"].status is StepStatus.FAIL
+    assert result.exit_code == 1  # FAIL present
+    assert "config" in result.output.lower()
+
+
+def test_setup_valid_config_does_not_scaffold(write_cfg, monkeypatch):
+    # Regression pin: a valid config takes the unchanged path — no scaffold,
+    # run_plan called with the real Config (cfg is not None).
+    captured = {}
+    monkeypatch.setattr("kagura_engineer.cli.run_plan", _spy_run_plan(captured))
+    result = runner.invoke(app, ["setup", "--config", str(write_cfg)])
+    assert "scaffolding" not in result.output.lower()
+    assert captured["cfg"] is not None
+    assert captured["config_step"] is None
+    assert result.exit_code == 0
 
 
 def _stub_run_report(status):
@@ -300,27 +394,68 @@ def test_run_missing_config_clean_error(tmp_path):
     assert "config" in result.output.lower()
 
 
-def test_doctor_missing_config_clean_error(tmp_path):
+# --- doctor: degraded report on missing/invalid config (issue #71) ---------
+# A fresh checkout has no repo.yaml. doctor must print a degraded table —
+# a synthetic `config` FAIL row plus the config-free checks — and exit 1
+# (non-zero when unhealthy), instead of the old one-line exit-2 refusal.
+
+
+def test_doctor_missing_config_degraded_report(tmp_path, monkeypatch):
+    # Stub run_all so the config-free checks don't shell out; we only assert
+    # the synthetic config row + that run_all was invoked with None.
+    seen = {}
+
+    def _spy(cfg):
+        seen["cfg"] = cfg
+        return [CheckResult("git", Status.OK, "ok")]
+
+    monkeypatch.setattr("kagura_engineer.cli.run_all", _spy)
     missing = tmp_path / "nope.yaml"
     result = runner.invoke(app, ["doctor", "--config", str(missing)])
-    assert result.exit_code == 2
+    assert result.exit_code == 1  # FAIL present, not the old exit-2 refusal
     assert "config" in result.output.lower()
+    assert seen["cfg"] is None  # config-free checks ran in degraded mode
 
 
-def test_doctor_invalid_config_clean_error(tmp_path):
+def test_doctor_invalid_config_degraded_report(tmp_path, monkeypatch):
+    monkeypatch.setattr("kagura_engineer.cli.run_all", lambda cfg: [])
     bad = tmp_path / "repo.yaml"
-    bad.write_text("profile: coding\n")
+    bad.write_text("profile: coding\n")  # cloud backend, blank creds → invalid
     result = runner.invoke(app, ["doctor", "--config", str(bad)])
-    assert result.exit_code == 2
+    assert result.exit_code == 1
     assert "config" in result.output.lower()
 
 
-def test_doctor_malformed_yaml_clean_error(tmp_path):
+def test_doctor_malformed_yaml_degraded_report(tmp_path, monkeypatch):
+    monkeypatch.setattr("kagura_engineer.cli.run_all", lambda cfg: [])
     bad = tmp_path / "repo.yaml"
     bad.write_text("profile: coding\n\tbad: tab\n")
     result = runner.invoke(app, ["doctor", "--config", str(bad)])
-    assert result.exit_code == 2
+    assert result.exit_code == 1
     assert "config" in result.output.lower() or "yaml" in result.output.lower()
+
+
+def test_doctor_degraded_json_has_config_check_object(tmp_path, monkeypatch):
+    # The synthetic config row must appear as a normal check object so the
+    # --json schema is unchanged (just one extra check).
+    import json
+
+    monkeypatch.setattr(
+        "kagura_engineer.cli.run_all",
+        lambda cfg: [CheckResult("git", Status.OK, "ok")],
+    )
+    missing = tmp_path / "nope.yaml"
+    result = runner.invoke(app, ["doctor", "--config", str(missing), "--json"])
+    assert result.exit_code == 1
+    data = json.loads(result.stdout)
+    assert data["overall"] == "fail"
+    config_rows = [c for c in data["checks"] if c["name"] == "config"]
+    assert len(config_rows) == 1
+    row = config_rows[0]
+    assert row["status"] == "fail"
+    assert set(row) == {"name", "status", "detail", "fix_hint"}
+    # The config row is first (the headline problem on a fresh checkout).
+    assert data["checks"][0]["name"] == "config"
 
 
 # --- review: exit code + JSON contract -------------------------------------

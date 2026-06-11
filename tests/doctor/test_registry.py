@@ -130,6 +130,50 @@ def test_registry_checks_claude_when_backend_is_claude(valid_config):
     assert "codex" not in names
 
 
+def test_run_all_without_config_runs_only_config_free_checks(monkeypatch):
+    # issue #71: doctor must degrade on a missing/invalid config — run_all(None)
+    # runs the config-free subset (git, brain-cli, gh, haiku, gh-issue-driven)
+    # and omits every config-dependent check (ollama, memory, memory-mcp).
+    calls = []
+
+    def _stub(name):
+        def _c(*a, **k):
+            calls.append(name)
+            return CheckResult(name, Status.OK, "stub")
+
+        return _c
+
+    for fn_name, label in [
+        ("check_git", "git"),
+        ("check_claude_code", "claude-code"),
+        ("check_gh", "gh"),
+        ("check_haiku", "haiku"),
+        ("check_gh_issue_driven", "gh-issue-driven"),
+    ]:
+        monkeypatch.setattr(registry.checks, fn_name, _stub(label))
+    # These must NOT be invoked when there is no config.
+    for fn_name in ("check_ollama", "check_memory_cloud", "check_local_memory", "check_memory_mcp"):
+        monkeypatch.setattr(registry.checks, fn_name, _stub("SHOULD-NOT-RUN"))
+
+    results = registry.run_all(None)
+    names = {r.name for r in results}
+    assert names == {"git", "claude-code", "gh", "haiku", "gh-issue-driven"}
+    assert "SHOULD-NOT-RUN" not in calls
+
+
+def test_run_all_without_config_defaults_brain_cli_to_claude(monkeypatch):
+    # With no config we cannot know brain_backend; brain-CLI presence defaults
+    # to the claude check (the Config default), never crashing on None.
+    monkeypatch.setattr(registry.checks, "check_claude_code", lambda: CheckResult("claude-code", Status.OK, "ok"))
+    monkeypatch.setattr(registry.checks, "check_codex", lambda: CheckResult("codex", Status.OK, "ok"))
+    for fn_name in ("check_git", "check_gh", "check_haiku", "check_gh_issue_driven"):
+        monkeypatch.setattr(registry.checks, fn_name, lambda *a, **k: CheckResult("x", Status.OK, "ok"))
+
+    names = {r.name for r in registry.run_all(None)}
+    assert "claude-code" in names
+    assert "codex" not in names
+
+
 def test_run_all_uses_local_memory_check_when_backend_local(monkeypatch, valid_config):
     local_cfg = valid_config.model_copy(update={"memory_backend": "local"})
     called = {"local": 0, "cloud": 0}
