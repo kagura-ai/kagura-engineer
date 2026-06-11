@@ -8,6 +8,8 @@ While the project is in `0.x`, minor versions may carry breaking changes.
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-06-11
+
 ### Added
 
 - `eval` command (#57, moat lever M3): an A/B harness that measures whether memory
@@ -19,6 +21,43 @@ While the project is in `0.x`, minor versions may carry breaking changes.
   reproducible JSON artifact and an `improved`/`regressed`/`neutral`/`inconclusive`
   uplift verdict. `kagura-engineer eval <issue> [<issue> …] [--review] [--json]`.
   See `docs/moat/m3-memory-uplift-eval.md`.
+- Brain backend selection (#51): `brain_backend: claude | codex` (+ optional
+  `brain_endpoint`, e.g. `ollama-cloud`) in repo.yaml routes the run loop through
+  the chosen kagura-brain adapter; the API key comes from `KAGURA_BRAIN_API_KEY`,
+  never repo.yaml.
+- `enable_codex_mcp` config seam (#68): formalizes the codex in-task-MCP
+  policy-vs-capability divergence as config data ("capable but disabled by
+  policy", default off). The flag-on path forwards the resolved MCP config to
+  codex with backend-correct tool ids, fails cleanly on a bad config file, and
+  logs its known caveats (no per-call tool allow-list on codex; not yet
+  smoke-verified end-to-end).
+
+### Changed
+
+- Adopted `kagura_brain.select()` and retired the consumer-side `brain_select`
+  core (#63) — the engineer keeps only the `supports_mcp` policy shim over the
+  library's `BrainHandle`.
+
+### Fixed
+
+- `goal`/`run`: a green-reviewed, CI-green PR is no longer reported as "fail" —
+  the ship guard cross-checks GitHub for the PR instead of trusting a missing
+  verdict marker (#64).
+- `review --fix`: the loop closes the memory client it creates (no more hang at
+  exit) (#56).
+- WAL `drain()` now serializes with `flock` — concurrent runs no longer
+  duplicate-replay or drop records — and tolerates a corrupt tail (#55).
+- `parse_verdict` anchors marker extraction to the tail of stdout, so an echoed
+  marker mid-transcript can no longer spoof the gate verdict (#54).
+- `select_brain` fails fast (clean `ConfigError`) on a half-configured BYO pair
+  (`KAGURA_BRAIN_API_KEY` without `brain_endpoint`), instead of a mid-run
+  traceback at the first invoke.
+
+### Security
+
+- WAL and local SQLite files are created `0600`/`0700` (no longer
+  umask-dependent world-readable) — memory payloads no longer leak to other
+  local users (#53).
 
 ## [0.3.0] — 2026-06-09
 
