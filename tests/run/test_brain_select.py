@@ -62,9 +62,9 @@ def test_default_is_claude_via_library_select_with_mcp_tools(spy_select):
 
 def test_codex_supports_mcp_false_and_no_mcp_kwargs_despite_library_capability(spy_select):
     # kagura_brain 0.4.0 reports codex as MCP-capable, but the engineer shim keeps
-    # codex at no-in-task-MCP (behavior preserved from #51 — enabling it is a
-    # separate change). The shim overrides the library capability and forwards
-    # neither mcp_config nor allowed_tools.
+    # codex at no-in-task-MCP by default (#51 behavior; opt-in via the
+    # enable_codex_mcp seam — tests below). The shim overrides the library
+    # capability and forwards neither mcp_config nor allowed_tools.
     call = select_brain(_cfg(brain_backend="codex"), env={})
     assert call.backend == "codex"
     assert call.supports_mcp is False
@@ -98,6 +98,15 @@ def test_endpoint_without_api_key_raises_before_select(spy_select):
     assert "call" not in spy_select  # ConfigError raised before reaching the library
 
 
+def test_api_key_without_endpoint_raises_before_select(spy_select):
+    # The library's BYO rule is both-or-neither but raises only at the first
+    # invoke (mid-run, past the clean-FAIL handlers) — a leftover exported key
+    # with no endpoint must fail fast as ConfigError instead.
+    with pytest.raises(ConfigError, match="brain_endpoint"):
+        select_brain(_cfg(), env={"KAGURA_BRAIN_API_KEY": "sk-leftover"})
+    assert "call" not in spy_select
+
+
 def test_subscription_claude_needs_no_api_key(spy_select):
     select_brain(_cfg(), env={})
     assert spy_select["call"]["api_key"] is None
@@ -115,8 +124,10 @@ def test_codex_keeps_engineer_no_mcp_warning(spy_select, caplog):
 # --- enable_codex_mcp policy seam (issue #68) ---------------------------------
 # "Capable but disabled by policy" is expressed as config data, not as a shim
 # flag that silently shadows the library capability. Default off preserves the
-# no-in-task-MCP behavior (regression-tested above); flag on forwards the full
-# MCP wiring to codex through the handle.
+# no-in-task-MCP behavior (regression-tested above); flag on forwards the
+# resolved MCP config to codex — and ONLY the config: codex has no per-call
+# tool allow-list (the adapter accepts-and-drops allowed_tools), so sending
+# MEMORY_TOOLS would only feign a confinement that does not exist.
 
 
 def test_codex_enable_codex_mcp_flag_enables_mcp(spy_select):
@@ -126,7 +137,18 @@ def test_codex_enable_codex_mcp_flag_enables_mcp(spy_select):
     assert call.mcp_enabled("/x/.mcp.json") is True
     call.invoke("hi", cwd=None, timeout=1, mcp_config="/x/.mcp.json")
     assert spy_select["handle"].invoked["mcp_config"] == "/x/.mcp.json"
-    assert spy_select["handle"].invoked["allowed_tools"] == MEMORY_TOOLS
+    assert "allowed_tools" not in spy_select["handle"].invoked  # no codex allow-list
+
+
+def test_codex_flag_on_without_resolved_config_forwards_nothing(spy_select):
+    # supports_mcp (policy) is not mcp_enabled (policy AND a resolved config):
+    # with nothing to wire, invoke must not ship MCP kwargs — they would only
+    # trip the codex adapter's dropped-allow-list warning on a no-MCP run.
+    call = select_brain(_cfg(brain_backend="codex", enable_codex_mcp=True), env={})
+    assert call.mcp_enabled(None) is False
+    call.invoke("hi", cwd=None, timeout=1, mcp_config=None)
+    assert "mcp_config" not in spy_select["handle"].invoked
+    assert "allowed_tools" not in spy_select["handle"].invoked
 
 
 def test_codex_enable_codex_mcp_replaces_out_of_band_warning(spy_select, caplog):
@@ -144,14 +166,6 @@ def test_enable_codex_mcp_defaults_false_and_claude_unaffected(spy_select):
     call = select_brain(_cfg(enable_codex_mcp=True), env={})
     assert call.backend == "claude"
     assert call.supports_mcp is True
-
-
-def test_real_handle_codex_flag_on_forwards_mcp_to_adapter(monkeypatch):
-    cap = _capture_adapter(monkeypatch, "codex")
-    call = select_brain(_cfg(brain_backend="codex", enable_codex_mcp=True), env={})
-    call.invoke("hi", cwd=None, timeout=5, mcp_config="/x/.mcp.json")
-    assert cap["mcp_config"] == "/x/.mcp.json"
-    assert tuple(cap["allowed_tools"]) == MEMORY_TOOLS
 
 
 # --- real-BrainHandle contract guard (NOT spy_select) -------------------------
@@ -194,4 +208,14 @@ def test_real_handle_codex_sends_no_live_mcp_to_adapter(monkeypatch):
     # The shim withholds mcp_config/tools for codex; through the real handle the
     # adapter therefore sees no live config and an empty tool set.
     assert cap.get("mcp_config") is None
+    assert tuple(cap.get("allowed_tools", ())) == ()
+
+
+def test_real_handle_codex_flag_on_forwards_config_without_allowlist(monkeypatch):
+    cap = _capture_adapter(monkeypatch, "codex")
+    call = select_brain(_cfg(brain_backend="codex", enable_codex_mcp=True), env={})
+    call.invoke("hi", cwd=None, timeout=5, mcp_config="/x/.mcp.json")
+    assert cap["mcp_config"] == "/x/.mcp.json"
+    # No allow-list reaches the adapter: codex would drop it anyway (no per-call
+    # tool allow-list), and the real adapter warns when one is supplied.
     assert tuple(cap.get("allowed_tools", ())) == ()

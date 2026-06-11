@@ -268,7 +268,10 @@ def run_idea(
                                # only start CREATES the branch; implement/ship
                                # follow the worktree's current branch.
                                branch_override=branch_override if phase == "start" else None)
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
+            # ValueError: the codex adapter parses mcp_config itself and raises
+            # on a missing/non-JSON file (a stale memory_mcp_config path) — a
+            # clean phase FAIL, not a traceback that would skip _finish().
             _log.exception("run %s phase failed to launch %s", phase, brain_call.backend)
             _record(PhaseResult(
                 phase, RunStatus.FAIL,

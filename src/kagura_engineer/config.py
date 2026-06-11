@@ -79,9 +79,10 @@ class Config(BaseModel):
     # Codex in-task MCP policy seam (issue #68). kagura_brain >= 0.4.0 is
     # MCP-capable for codex, but the engineer keeps codex at no-in-task-MCP by
     # default as a harness policy ("capable but disabled by policy", from #51/#63).
-    # Set true to forward the MCP wiring (mcp_config + allowed_tools) to codex —
-    # note the flag-on path's end-to-end grounding (codex adapter's .mcp.json ->
-    # -c mcp_servers.* translation) is not yet smoke-verified.
+    # Set true to forward the resolved MCP config to codex. Known flag-on caveats
+    # are logged at select time (see run/brain_select.py): the path is not yet
+    # smoke-verified end-to-end, and codex has no per-call tool allow-list, so
+    # the MEMORY_TOOLS confinement claude gets does not apply there.
     enable_codex_mcp: bool = False
 
     def resolve_mcp_config(self, repo_root: str | Path) -> str | None:

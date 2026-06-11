@@ -9,3 +9,13 @@ keep them here and pass them to the harness as ``allowed_tools``.
 from __future__ import annotations
 
 MEMORY_TOOLS = ("mcp__kagura-memory__recall", "mcp__kagura-memory__remember")
+# Codex registers MCP tools under normalized identifiers (server name
+# hyphen -> underscore, verified on codex-cli 0.133.0), so the same tools
+# surface there as mcp__kagura_memory__* — the claude-style ids above do not
+# exist in a codex session.
+CODEX_MEMORY_TOOLS = ("mcp__kagura_memory__recall", "mcp__kagura_memory__remember")
+
+
+def memory_tool_ids(backend: str) -> tuple[str, str]:
+    """The (recall, remember) tool ids as the given backend's runtime names them."""
+    return CODEX_MEMORY_TOOLS if backend == "codex" else MEMORY_TOOLS
