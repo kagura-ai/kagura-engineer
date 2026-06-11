@@ -8,7 +8,13 @@ import typer
 import yaml
 
 from . import __version__
-from .config import CLOUD_REQUIRED_FIELDS, ConfigError, load_config
+from .config import (
+    CLOUD_REQUIRED_FIELDS,
+    ConfigError,
+    ConfigLoad,
+    load_config,
+    load_config_lenient,
+)
 from .profile import render_lines as profile_lines
 from .profile import resolve_profile
 from .profile import to_dict as profile_dict
@@ -17,7 +23,7 @@ from .eval import ReviewFn, run_ab_eval
 from .eval.render import print_table as eval_print_table
 from .eval.render import to_json as eval_to_json
 from .doctor.render import print_table, to_json
-from .doctor.result import Status
+from .doctor.result import CheckResult, Status
 from .goal import GOAL_STATUS_EXIT, run_milestone
 from .goal.render import print_table as goal_print_table
 from .goal.render import to_json as goal_to_json
@@ -33,6 +39,7 @@ from .review.render import to_json as review_to_json
 from .setup import STEP_NAMES, build_plan, run_plan
 from .setup.render import print_table as setup_print_table
 from .setup.render import to_json as setup_to_json
+from .setup.result import StepResult, StepStatus
 from .setup.scaffold import scaffold
 
 app = typer.Typer(help="Autonomous coding harness over Claude Code + Kagura Memory.")
@@ -73,24 +80,55 @@ def _main(
 # ---------------------------------------------------------------------------
 
 
+def _degraded_config_check(load: ConfigLoad) -> CheckResult:
+    """Synthetic `config` FAIL row for doctor's degraded report (issue #71).
+
+    On a missing/invalid config doctor no longer refuses; it prepends this row
+    (the headline problem on a fresh checkout) and then runs the config-free
+    checks. The fix hint points at `setup`, the one command a fresh checkout
+    needs to type first.
+    """
+    hint = (
+        "run `kagura-engineer setup` to scaffold repo.yaml and bootstrap"
+        if load.missing
+        else "fix repo.yaml (or run `kagura-engineer setup`)"
+    )
+    return CheckResult("config", Status.FAIL, load.error or "config unavailable", hint)
+
+
 @app.command()
 def doctor(
     config: str = _CONFIG_OPT, json_out: bool = typer.Option(False, "--json")
 ) -> None:
-    """Check the dependency chain."""
-    try:
-        cfg = load_config(config)
-        # issue #70: resolve the execution profile up-front so doctor answers
-        # "what would run" before "is it healthy". Raises only ConfigError
-        # (codex half-pair), handled like an invalid config.
-        prof = resolve_profile(cfg, os.environ, Path.cwd())
-    except ConfigError as exc:
-        typer.echo(f"doctor: invalid config '{config}': {exc}", err=True)
-        raise typer.Exit(code=2)
-    _echo_profile(prof, json_out)
-    results = run_all(cfg)
+    """Check the dependency chain.
+
+    On a missing/invalid config (a fresh checkout) doctor degrades instead of
+    refusing: a synthetic `config` FAIL row plus the config-free checks, exiting
+    non-zero (1) so "unhealthy → non-zero" is preserved (issue #71). With a
+    valid config it also resolves and prints the execution profile up-front, so
+    doctor answers "what would run" before "is it healthy" (issue #70).
+    """
+    load = load_config_lenient(config)
+    prof = None
+    if load.cfg is None:
+        # Degraded report: headline config row first, then config-free checks.
+        results = [_degraded_config_check(load), *run_all(None)]
+    else:
+        # issue #70: resolve the execution profile up-front. resolve_profile
+        # raises only ConfigError (codex half-pair); degrade like an invalid
+        # config rather than crashing on it.
+        try:
+            prof = resolve_profile(load.cfg, os.environ, Path.cwd())
+        except ConfigError as exc:
+            degraded = ConfigLoad(cfg=None, error=str(exc), missing=False)
+            results = [_degraded_config_check(degraded), *run_all(None)]
+        else:
+            _echo_profile(prof, json_out)
+            results = run_all(load.cfg)
     if json_out:
-        typer.echo(to_json(results, profile=profile_dict(prof)))
+        typer.echo(to_json(
+            results, profile=profile_dict(prof) if prof is not None else None
+        ))
     else:
         print_table(results)
     if overall_status(results) is Status.FAIL:
@@ -115,6 +153,48 @@ def _check_fix_name(only: str | None, plan: list[str]) -> str | None:
             f"valid names: {', '.join(STEP_NAMES)}"
         )
     return None
+
+
+def _setup_config_step(
+    load: ConfigLoad, scaffold_error: str | None = None, *, scaffolded: bool = False
+) -> StepResult:
+    """Synthetic `config` step for setup's degraded plan (issue #71).
+
+    Normally NEEDS_USER (not FAIL): the user must supply something before the
+    config-dependent steps can run. What that something is depends on how we
+    got here: on the fresh-checkout path (`missing`, or `scaffolded` — the
+    file was just written from the template, so its blockers are the blank
+    cloud creds) the hint names the credentials, derived from
+    CLOUD_REQUIRED_FIELDS — the same SSOT the `init` next-step wording uses,
+    so the two never drift. A pre-existing repo.yaml that fails to load could
+    be broken in any way (syntax, validation), so the hint says to fix it —
+    mirroring doctor's `_degraded_config_check` wording — and the detail field
+    carries the actual error.
+
+    When auto-scaffold itself failed (an unwritable dir), the step is FAIL
+    instead — a hard error the user must clear before anything can proceed.
+    """
+    if scaffold_error is not None:
+        return StepResult(
+            "config",
+            StepStatus.FAIL,
+            scaffold_error,
+            fix_hint="make the directory writable, then re-run `kagura-engineer setup`",
+        )
+    if load.missing or scaffolded:
+        creds = ", ".join(CLOUD_REQUIRED_FIELDS)
+        hint = (
+            f"fill in the cloud credentials ({creds}) in repo.yaml, "
+            "then re-run `kagura-engineer setup`"
+        )
+    else:
+        hint = "fix repo.yaml, then re-run `kagura-engineer setup`"
+    return StepResult(
+        "config",
+        StepStatus.NEEDS_USER,
+        load.error or "config unavailable",
+        fix_hint=hint,
+    )
 
 
 def _written_backend_needs_creds(repo_yaml_path: Path) -> bool:
@@ -210,11 +290,29 @@ def setup(
         2 — at least one step NEEDS_USER (interactive action required)
         2 — also used for config / unknown --fix errors
     """
-    try:
-        cfg = load_config(config)
-    except ConfigError as exc:
-        typer.echo(f"setup: invalid config '{config}': {exc}", err=True)
-        raise typer.Exit(code=2)
+    load = load_config_lenient(config)
+
+    # First-install UX (issue #71): a missing repo.yaml is the fresh-checkout
+    # case. Auto-scaffold it (same code path as `init`) so `setup` is the only
+    # command a new checkout has to type — then re-load. Suppressed under
+    # --dry-run, where a preview must not write to disk.
+    scaffold_error: str | None = None
+    scaffolded = False
+    if load.cfg is None and load.missing and not dry_run:
+        try:
+            scaffold(Path(config).parent)
+        except OSError as exc:
+            # An unwritable dir must surface as a config FAIL row, not a traceback.
+            scaffold_error = f"could not scaffold repo.yaml: {exc}"
+        else:
+            typer.echo(
+                f"{config} not found — scaffolding one (same as 'kagura-engineer init')"
+            )
+            # After the re-load `missing` flips False (the file now exists),
+            # but the right hint is still the template's blank creds — carry
+            # the fact that we just scaffolded into the synthetic config step.
+            scaffolded = True
+            load = load_config_lenient(config)
 
     # Validate --fix before running anything.
     err = _check_fix_name(fix, build_plan(only=fix))
@@ -222,7 +320,21 @@ def setup(
         typer.echo(err, err=True)
         raise typer.Exit(code=2)
 
-    report = run_plan(cfg, no_input=no_input, dry_run=dry_run, only=fix, full=full)
+    if load.cfg is not None:
+        report = run_plan(
+            load.cfg, no_input=no_input, dry_run=dry_run, only=fix, full=full
+        )
+    else:
+        # Degraded plan: a synthetic config step naming the next action, the
+        # config-free steps run, the config-dependent ones SKIPPED.
+        report = run_plan(
+            None,
+            no_input=no_input,
+            dry_run=dry_run,
+            only=fix,
+            full=full,
+            config_step=_setup_config_step(load, scaffold_error, scaffolded=scaffolded),
+        )
 
     if json_out:
         typer.echo(setup_to_json(report))

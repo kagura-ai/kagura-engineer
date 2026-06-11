@@ -65,6 +65,13 @@ STEP_NAMES: list[str] = [
     "memory-mcp",
 ]
 
+# Config-free steps (issue #71): their builders read no config fields, so they
+# run identically on a fresh checkout with no valid config. The rest read
+# cloud creds / ollama_url / mcp and are SKIPPED "waiting on config" in
+# setup's degraded mode. Declared as data so the config-free subset is not an
+# if-ladder — mirrors the doctor registry's `needs_config` flag.
+CONFIG_FREE_STEPS: frozenset[str] = frozenset({"git", "claude-code", "gh"})
+
 # Per-step registry: name -> callable. Each callable receives
 # (platform, config, *, no_input, dry_run, full). The kwargs shape
 # varies per step (e.g. ollama needs ollama_url, claude takes no
@@ -96,6 +103,25 @@ _STEP_FNS: dict[str, Callable[..., StepResult]] = {
 }
 
 
+def _bucket_for(
+    result: StepResult,
+    ran: list[StepResult],
+    skipped: list[StepResult],
+    failed: list[StepResult],
+    needs_user: list[StepResult],
+) -> None:
+    """Append `result` to its status bucket. Shared by the synthetic config
+    step and every per-step result so the four-bucket routing lives once."""
+    if result.status is StepStatus.OK:
+        ran.append(result)
+    elif result.status is StepStatus.SKIPPED:
+        skipped.append(result)
+    elif result.status is StepStatus.NEEDS_USER:
+        needs_user.append(result)
+    else:  # FAIL, and defensively any unknown status
+        failed.append(result)
+
+
 def build_plan(only: str | None = None) -> list[str]:
     """Return the ordered list of step names that will run, filtered
     by `--fix <name>` if provided.
@@ -110,12 +136,13 @@ def build_plan(only: str | None = None) -> list[str]:
 
 
 def run_plan(
-    cfg: Config,
+    cfg: Config | None,
     *,
     no_input: bool,
     dry_run: bool,
     only: str | None = None,
     full: bool = False,
+    config_step: StepResult | None = None,
 ) -> SetupReport:
     """Execute the build plan and aggregate results into a SetupReport.
 
@@ -126,6 +153,13 @@ def run_plan(
 
     `full` is the `--full` opt-in: it reaches the memory-mcp step so the
     SDK additionally installs hooks + skills (default: `.mcp.json` only).
+
+    Degraded mode (issue #71): when `cfg is None` the config is missing/invalid.
+    `config_step` (a synthetic `config` StepResult the caller built with the
+    creds hint) is folded into the report, the config-free steps still run, and
+    every config-dependent step is reported `SKIPPED (waiting on config)` rather
+    than crashing on the absent config. With a valid `cfg`, `config_step` is
+    unused and behaviour is unchanged byte-for-byte.
     """
     platform = detect()
     plan = build_plan(only=only)
@@ -135,7 +169,22 @@ def run_plan(
     needs_user: list[StepResult] = []
     overall_start = time.monotonic()
 
+    if config_step is not None:
+        _bucket_for(config_step, ran, skipped, failed, needs_user)
+
     for name in plan:
+        if cfg is None and name not in CONFIG_FREE_STEPS:
+            # Config-dependent step with no usable config: skip with a reason
+            # that names the blocker, instead of reading fields off None.
+            skipped.append(
+                StepResult(
+                    name,
+                    StepStatus.SKIPPED,
+                    "waiting on config",
+                    fix_hint="resolve the config step above, then re-run setup",
+                )
+            )
+            continue
         fn = _STEP_FNS[name]
         try:
             result = fn(platform, cfg, no_input=no_input, dry_run=dry_run, full=full)
@@ -148,16 +197,7 @@ def run_plan(
                 fix_hint="this is a setup bug; please report it",
             )
 
-        if result.status is StepStatus.OK:
-            ran.append(result)
-        elif result.status is StepStatus.SKIPPED:
-            skipped.append(result)
-        elif result.status is StepStatus.FAIL:
-            failed.append(result)
-        elif result.status is StepStatus.NEEDS_USER:
-            needs_user.append(result)
-        else:  # pragma: no cover — defensive, no other status exists
-            failed.append(result)
+        _bucket_for(result, ran, skipped, failed, needs_user)
 
     return SetupReport(
         ran=ran,

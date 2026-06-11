@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -146,3 +147,40 @@ def load_config(path: str | Path) -> Config:
         return Config.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(f"config validation failed: {exc}") from exc
+
+
+@dataclass(frozen=True)
+class ConfigLoad:
+    """Outcome of a lenient config load (issue #71).
+
+    The first-install seam: `doctor`/`setup` must operate on a fresh checkout
+    that has no (or an incomplete) `repo.yaml` instead of refusing. This carries
+    enough to drive a degraded report without re-deriving it:
+
+      cfg     — the validated Config, or None when missing/unparseable/invalid
+      error   — the ConfigError message when cfg is None (else None)
+      missing — the file does not exist specifically (drives setup's
+                auto-scaffold); an existing-but-invalid file has missing=False
+    """
+
+    cfg: Config | None
+    error: str | None
+    missing: bool
+
+
+def load_config_lenient(path: str | Path) -> ConfigLoad:
+    """Load `repo.yaml` without raising — the lenient counterpart of `load_config`.
+
+    `load_config` stays the hard requirement for `run`/`goal`/`review`/`eval`
+    (they cannot do anything useful without a valid config). This wrapper lets
+    `doctor`/`setup` — whose whole job is "get me to a healthy state" — degrade
+    gracefully on a missing/incomplete config instead of exiting on the spot.
+    Never raises: every failure mode of `load_config` becomes a populated
+    `ConfigLoad.error`.
+    """
+    p = Path(path)
+    missing = not p.is_file()
+    try:
+        return ConfigLoad(cfg=load_config(p), error=None, missing=False)
+    except ConfigError as exc:
+        return ConfigLoad(cfg=None, error=str(exc), missing=missing)
