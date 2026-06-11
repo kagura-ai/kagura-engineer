@@ -33,7 +33,9 @@ def test_invoke_phase_uses_the_supplied_brain_call(tmp_path):
     assert records and records[0]["mcp_config"] == "/x/.mcp.json"
 
 
-def test_invoke_phase_codex_call_gets_no_mcp_kwargs(tmp_path):
+def test_invoke_phase_mcp_off_policy_gets_no_mcp_kwargs(tmp_path):
+    # supports_mcp=False is the no-in-task-MCP policy (codex without
+    # enable_codex_mcp) — not a codex constant; see brain_select.
     records: list[dict] = []
     call = _fake_call(records, supports_mcp=False)
     invoke_phase(
@@ -67,7 +69,8 @@ def _fake_brain_call(
 
     Mirrors the old ``monkeypatch.setattr(workflow.brain, "invoke", ...)`` seam:
     the captured kwargs are exactly what ``BrainCall.invoke`` forwards to the
-    adapter (cwd/timeout, plus mcp_config/allowed_tools when MCP is supported).
+    adapter (cwd/timeout, plus mcp_config/allowed_tools when MCP is live —
+    policy on AND a config resolved).
     """
     return BrainCall(
         "fake",
@@ -331,13 +334,15 @@ def test_invoke_phase_routes_through_harness_brain_and_parses(tmp_path):
         stdout="work...\nKAGURA_VERDICT=green\nKAGURA_PR_URL=https://x/pull/1\n",
         capture=cap,
     )
-    inv = workflow.invoke_phase("ship", 3, tmp_path, ["g"], brain_call=call)
+    inv = workflow.invoke_phase("ship", 3, tmp_path, ["g"], brain_call=call,
+                                mcp_config="/x/.mcp.json")
     assert isinstance(inv, PhaseInvocation)
     assert inv.verdict == "green"
     assert inv.pr_url == "https://x/pull/1"
     assert inv.returncode == 0
     assert inv.phase == "ship"
-    # Forwarded to the launcher seam: worktree cwd + the pre-approved memory tools.
+    # Forwarded to the launcher seam: worktree cwd + the pre-approved memory
+    # tools (MCP wiring requires a resolved config — see brain_select).
     assert cap["cwd"] == tmp_path
     assert tuple(cap["allowed_tools"]) == MEMORY_TOOLS
 
@@ -425,10 +430,28 @@ def test_invoke_phase_forwards_mcp_config_to_brain(tmp_path):
 
 
 def test_invoke_phase_no_mcp_config_by_default(tmp_path):
+    # With no resolved config, mcp_enabled() is False and the shim forwards no
+    # MCP kwargs at all (it used to ship mcp_config=None + allowed_tools, which
+    # only tripped the codex adapter's dropped-allow-list warning).
     cap = {}
     call = _fake_brain_call(capture=cap)
     workflow.invoke_phase("ship", 2, tmp_path, [], brain_call=call)
-    assert cap["mcp_config"] is None
+    assert cap.get("mcp_config") is None
+    assert "allowed_tools" not in cap
+
+
+def test_invoke_phase_codex_prompt_uses_normalized_tool_ids(tmp_path):
+    # codex registers MCP tools under normalized ids (kagura_memory, not
+    # kagura-memory) — the prompt must point the child at ids that exist.
+    cap = {}
+    call = BrainCall(
+        "codex",
+        SimpleNamespace(invoke=_fake_brain(stdout="KAGURA_VERDICT=green\n", capture=cap)),
+        supports_mcp=True,
+    )
+    workflow.invoke_phase("ship", 2, tmp_path, [], mcp_config="/tmp/m.json", brain_call=call)
+    assert "mcp__kagura_memory__recall" in cap["prompt"]
+    assert "mcp__kagura-memory__recall" not in cap["prompt"]
 
 
 # --- issue #9: the implement phase ----------------------------------------

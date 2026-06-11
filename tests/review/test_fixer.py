@@ -53,6 +53,7 @@ def test_run_fixer_routes_through_harness_brain_in_repo(tmp_path):
     res = fixer.run_fixer(
         tmp_path, "do the fix",
         brain_call=_fake_brain_call(stdout="fixed and committed", capture=cap),
+        mcp_config="/x/.mcp.json",  # MCP wiring requires a resolved config
     )
     assert isinstance(res, FixerResult)
     assert cap["prompt"] == "do the fix"
@@ -97,6 +98,17 @@ def test_build_fix_prompt_mcp_note_when_enabled():
     assert "mcp__kagura-memory__recall" in p
 
 
+def test_build_fix_prompt_uses_backend_tool_ids():
+    # codex normalizes the server name in tool ids; the prompt must name the
+    # id the backend actually registers.
+    p = fixer.build_fix_prompt(
+        None, _findings(), mcp_enabled=True,
+        mcp_tools=("mcp__kagura_memory__recall", "mcp__kagura_memory__remember"),
+    )
+    assert "mcp__kagura_memory__recall" in p
+    assert "mcp__kagura-memory__recall" not in p
+
+
 def test_run_fixer_forwards_mcp_config_to_brain(tmp_path):
     cap = {}
     fixer.run_fixer(
@@ -105,7 +117,9 @@ def test_run_fixer_forwards_mcp_config_to_brain(tmp_path):
     assert cap["mcp_config"] == "/tmp/m.json"
 
 
-def test_run_fixer_uses_brain_call_and_omits_mcp_for_codex(tmp_path):
+def test_run_fixer_uses_brain_call_and_omits_mcp_when_policy_off(tmp_path):
+    # supports_mcp=False is the no-in-task-MCP policy (codex without
+    # enable_codex_mcp) — not a codex constant; see brain_select.
     records: list[dict] = []
     def _invoke(prompt, **kwargs):
         records.append(kwargs)

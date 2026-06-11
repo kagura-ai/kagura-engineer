@@ -82,6 +82,21 @@ def test_fixer_not_on_path_is_fail(monkeypatch, tmp_path):
     assert "could not launch" in rep.detail.lower()
 
 
+def test_fixer_bad_mcp_config_is_clean_fail(monkeypatch, tmp_path):
+    # The codex adapter parses mcp_config itself and raises ValueError on a
+    # missing/non-JSON file (reachable with enable_codex_mcp=true and a stale
+    # memory_mcp_config) — a clean FAIL, not a traceback out of the loop.
+    _seq_review(monkeypatch, [ReviewStatus.BLOCKED])
+
+    def _boom(repo, prompt, **kw):
+        raise ValueError("codex mcp_config '/stale' could not be read as JSON")
+
+    monkeypatch.setattr(loop, "run_fixer", _boom, raising=True)
+    rep = review_fix_loop(_cfg(), "HEAD", base="main", memory=_Mem(), repo_root=tmp_path)
+    assert rep.status is ReviewStatus.FAIL
+    assert "could not launch" in rep.detail.lower()
+
+
 def test_review_fail_does_not_fix(monkeypatch, tmp_path):
     # an infra FAIL must NOT trigger a fix — findings can't be trusted
     calls = {"fix": 0}

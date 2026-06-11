@@ -26,6 +26,7 @@ import time
 from pathlib import Path
 
 from ..config import Config, ConfigError
+from ..mcp import memory_tool_ids
 from ..run.brain_select import select_brain
 from ..run.memory import MemoryClient, resolve_memory_client
 from . import review_pr
@@ -68,8 +69,10 @@ def review_fix_loop(
         )
 
     try:
-        # Resolve the brain backend ONCE up-front (issue #51): codex omits MCP
-        # tools, claude keeps them. A bad endpoint/key config is a clean FAIL.
+        # Resolve the brain backend ONCE up-front (issue #51); whether MCP
+        # wiring is forwarded is decided by select_brain's policy (codex only
+        # with enable_codex_mcp, issue #68). A bad endpoint/key config is a
+        # clean FAIL.
         try:
             brain_call = select_brain(cfg, os.environ)
         except ConfigError as exc:
@@ -100,10 +103,13 @@ def review_fix_loop(
             blocking = [f for f in rep.findings if f.severity.upper() in _BLOCKING_SEVERITIES]
             mcp_config = cfg.resolve_mcp_config(root)
             prompt = build_fix_prompt(rep.report_path, blocking or rep.findings,
-                                      mcp_enabled=brain_call.mcp_enabled(mcp_config))
+                                      mcp_enabled=brain_call.mcp_enabled(mcp_config),
+                                      mcp_tools=memory_tool_ids(brain_call.backend))
             try:
                 fix = run_fixer(root, prompt, brain_call=brain_call, mcp_config=mcp_config)
-            except OSError as exc:
+            except (OSError, ValueError) as exc:
+                # ValueError: the codex adapter raises on a missing/non-JSON
+                # mcp_config file — convert to a clean FAIL like OSError.
                 _log.exception("review --fix could not launch %s", brain_call.backend)
                 return _finish(
                     ReviewStatus.FAIL,
