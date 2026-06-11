@@ -228,6 +228,70 @@ def test_run_plan_passes_platform_and_config_to_steps(monkeypatch, valid_config)
     assert calls == STEP_NAMES
 
 
+# --- run_plan: degraded mode on missing/invalid config (issue #71) ----------
+# setup must not refuse on a fresh/incomplete config. In degraded mode
+# (cfg=None + a synthetic config_step) the config-free steps (git/claude-code/
+# gh) still run while the config-dependent steps are SKIPPED "waiting on config".
+
+
+def _config_step():
+    return StepResult(
+        "config", StepStatus.NEEDS_USER, "blank cloud creds", "fill in repo.yaml"
+    )
+
+
+def test_run_plan_degraded_runs_config_free_and_skips_rest(monkeypatch):
+    calls = []
+
+    def _stub(name):
+        def _f(*a, **kw):
+            calls.append(name)
+            return StepResult(name, StepStatus.OK, "ok")
+        return _f
+
+    monkeypatch.setattr("kagura_engineer.setup.git.ensure_git", _stub("git"))
+    monkeypatch.setattr("kagura_engineer.setup.claude.ensure_claude_login", _stub("claude-code"))
+    monkeypatch.setattr("kagura_engineer.setup.gh.ensure_gh_auth", _stub("gh"))
+    # Config-dependent steps must never be invoked without a config.
+    for dotted in (
+        "kagura_engineer.setup.ollama.ensure_ollama_up",
+        "kagura_engineer.setup.ollama.pull_ollama_models",
+        "kagura_engineer.setup.memory_cloud.ensure_memory_cloud_reachable",
+        "kagura_engineer.setup.memory_mcp.ensure_memory_mcp_config",
+    ):
+        monkeypatch.setattr(dotted, _stub("SHOULD-NOT-RUN"))
+
+    report = run_plan(None, no_input=False, dry_run=False, config_step=_config_step())
+
+    # config-free steps ran; config-dependent ones never fired.
+    assert calls == ["git", "claude-code", "gh"]
+    assert "SHOULD-NOT-RUN" not in calls
+    # The synthetic config row is surfaced as NEEDS_USER.
+    assert any(r.name == "config" for r in report.needs_user)
+    # ollama/memory* land in SKIPPED with the waiting-on-config reason.
+    skipped = {r.name: r for r in report.skipped}
+    assert {"ollama", "ollama-models", "memory-cloud", "memory-mcp"} <= set(skipped)
+    assert all("config" in skipped[n].detail for n in
+               ("ollama", "ollama-models", "memory-cloud", "memory-mcp"))
+    assert report.failed == []
+    assert report.is_blocked is True  # NEEDS_USER present
+
+
+def test_run_plan_degraded_fix_config_dependent_step_is_skipped(monkeypatch):
+    # `--fix ollama` with an invalid config reports ollama SKIPPED, not a crash.
+    monkeypatch.setattr(
+        "kagura_engineer.setup.ollama.ensure_ollama_up",
+        lambda *a, **kw: StepResult("ollama", StepStatus.OK, "SHOULD-NOT-RUN"),
+    )
+    report = run_plan(
+        None, no_input=False, dry_run=False, only="ollama", config_step=_config_step()
+    )
+    skipped = {r.name: r for r in report.skipped}
+    assert "ollama" in skipped
+    assert "config" in skipped["ollama"].detail
+    assert report.ran == []
+
+
 def test_run_plan_threads_full_into_memory_mcp_step(monkeypatch, valid_config):
     # `--full` must reach the memory-mcp step (and only that step cares).
     seen = {}
