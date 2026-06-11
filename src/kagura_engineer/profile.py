@@ -95,3 +95,9 @@ def render_lines(profile: ExecutionProfile, *, brain: bool = True) -> list[str]:
 def to_dict(profile: ExecutionProfile) -> dict:
     """The JSON form of the profile (the `"profile"` object in every report)."""
     return asdict(profile)
+
+
+def to_dict_or_none(profile: ExecutionProfile | None) -> dict | None:
+    """Null-safe `to_dict` — the single embed form every report renderer uses
+    (a report built outside the CLI carries no profile; render `null`)."""
+    return to_dict(profile) if profile else None

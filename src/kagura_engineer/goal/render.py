@@ -6,7 +6,7 @@ import json
 from rich.console import Console
 from rich.table import Table
 
-from ..profile import to_dict as _profile_dict
+from ..profile import to_dict_or_none as _profile_dict
 from ..run.result import STATUS_ICON as _ICON
 from .result import GoalReport
 
@@ -16,7 +16,7 @@ def to_json(report: GoalReport) -> str:
         {
             "milestone": report.milestone,
             "status": report.status.value,
-            "profile": _profile_dict(report.profile) if report.profile else None,
+            "profile": _profile_dict(report.profile),
             "completed": report.completed,
             "total": len(report.issues),
             "detail": report.detail,
