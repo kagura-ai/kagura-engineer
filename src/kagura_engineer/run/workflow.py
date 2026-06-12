@@ -247,6 +247,10 @@ def build_prompt(
             # the terminal step and stops before push / `gh pr create`, leaving a
             # green run with no PR. Make push + PR the explicit, non-skippable
             # final action so the headless session does not end at the review.
+            # This is the preventive half of the #80 fix; the reactive half is
+            # the orchestrator's `recover_open_pr` fallback (run/__init__.py #18
+            # guard) — keep both: the prompt reduces how often recovery fires,
+            # recovery guarantees a PR when the prompt is ignored.
             body += (
                 "Pushing the branch and opening (or updating) the pull request via "
                 "`gh pr create` is the MANDATORY final action of this phase — the "
@@ -447,7 +451,7 @@ def recover_open_pr(worktree: Path, issue: int) -> str | None:
     try:
         head = run_text(
             ["git", "-C", str(worktree), "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, timeout=_PR_LOOKUP_TIMEOUT_S,
+            capture_output=True, timeout=_RECOVER_TIMEOUT_S,
         )
     except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
         return None
@@ -472,7 +476,7 @@ def recover_open_pr(worktree: Path, issue: int) -> str | None:
     try:
         tp = run_text(
             ["gh", "issue", "view", str(issue), "--json", "title", "-q", ".title"],
-            cwd=str(worktree), capture_output=True, timeout=_PR_LOOKUP_TIMEOUT_S,
+            cwd=str(worktree), capture_output=True, timeout=_RECOVER_TIMEOUT_S,
         )
         if tp.returncode == 0 and tp.stdout.strip():
             title = tp.stdout.strip()
@@ -496,13 +500,13 @@ def recover_open_pr(worktree: Path, issue: int) -> str | None:
         return None
     if created.returncode != 0:
         return None
-    # `gh pr create` prints the PR URL to stdout; take the last URL-shaped line so
-    # a leading notice line can't be mistaken for the URL. If a future gh silences
-    # it, the PR was still created — look it up rather than declaring FAIL on a PR
-    # we just opened.
+    # `gh pr create` prints the PR URL to stdout; pick the last PR-shaped line
+    # (contains `/pull/`) so neither a leading notice nor a trailing advisory URL
+    # is mistaken for it. If a future gh silences the URL, the PR was still
+    # created — look it up rather than declaring FAIL on a PR we just opened.
     url = next(
         (ln.strip() for ln in reversed(created.stdout.splitlines())
-         if ln.strip().startswith("http")),
+         if ln.strip().startswith("http") and "/pull/" in ln),
         None,
     )
     return url or lookup_pr_url(worktree)
