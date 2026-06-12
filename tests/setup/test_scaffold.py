@@ -71,7 +71,7 @@ class TestEnsureRepoYaml:
     def test_writes_template_when_absent(self, tmp_path: Path) -> None:
         wrote = scaffold.ensure_repo_yaml(tmp_path)
         assert wrote is True
-        text = (tmp_path / "repo.yaml").read_text()
+        text = (tmp_path / "repo.yaml").read_text(encoding="utf-8")
         # The template documents the real Config fields a user must fill in.
         for field in ("profile", "memory_backend", "workspace_id", "context_id"):
             assert field in text
@@ -86,7 +86,7 @@ class TestEnsureRepoYaml:
     def test_template_is_valid_yaml(self, tmp_path: Path) -> None:
         scaffold.ensure_repo_yaml(tmp_path)
         # Whatever the template ships, it must parse as YAML (commented lines ok).
-        data = yaml.safe_load((tmp_path / "repo.yaml").read_text())
+        data = yaml.safe_load((tmp_path / "repo.yaml").read_text(encoding="utf-8"))
         assert isinstance(data, dict)
 
 

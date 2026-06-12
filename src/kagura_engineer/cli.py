@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -56,6 +57,23 @@ def _echo_profile(prof, json_out: bool, *, brain: bool = True) -> None:
         typer.echo(line)
 
 
+def _configure_stdio_utf8() -> None:
+    """Force UTF-8 on stdout/stderr so the `--json` contract (and em-dash / 日本語
+    fix-hints) survive a cp932 console (issue #78). Without this,
+    `typer.echo(to_json(...))` raises UnicodeEncodeError on a Japanese Windows
+    console even though the checks ran. Best-effort: a stream that lacks
+    `reconfigure` (already wrapped, or redirected to a plain buffer) is left as-is.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8")
+        except (OSError, ValueError):  # pragma: no cover - stream not reconfigurable
+            pass
+
+
 def _version_callback(value: bool) -> None:
     if value:
         typer.echo(__version__)
@@ -73,6 +91,9 @@ def _main(
     ),
 ) -> None:
     """Autonomous coding harness over Claude Code + Kagura Memory."""
+    # issue #78: pin UTF-8 on stdio before any command writes JSON / fix-hints,
+    # so a cp932 console can't turn an em-dash into a UnicodeEncodeError traceback.
+    _configure_stdio_utf8()
 
 
 # ---------------------------------------------------------------------------

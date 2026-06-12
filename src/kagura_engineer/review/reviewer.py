@@ -17,6 +17,7 @@ from pathlib import Path
 
 from kagura_brain.core import as_text
 
+from .._launch import run_text
 from .envelope import ReviewEnvelope
 
 _REVIEW_TIMEOUT_S = 1800  # 30 min — a large diff with high effort can be slow
@@ -61,9 +62,12 @@ def resolve_head(target: str) -> str:
     if not target.isdigit():
         return target
     try:
-        proc = subprocess.run(
+        # run_text (issue #78): `gh` is a `.cmd` shim on Windows; a bare
+        # subprocess.run raises WinError 2 and this would silently return the raw
+        # token. launch_argv resolves it; utf-8/replace avoids a cp932 crash.
+        proc = run_text(
             ["gh", "pr", "view", target, "--json", "headRefName", "-q", ".headRefName"],
-            capture_output=True, text=True, check=True,
+            capture_output=True, check=True,
         )
     except (OSError, subprocess.CalledProcessError):
         return target
@@ -84,8 +88,11 @@ def run_reviewer(
     # without rewriting --out can never be mis-gated on old findings.
     out.unlink(missing_ok=True)
     try:
-        proc = subprocess.run(
-            argv, capture_output=True, text=True, timeout=timeout,
+        # run_text (issue #78): `kagura-code-reviewer` is an npm `.cmd` shim, so a
+        # bare subprocess.run raises WinError 2 on Windows; launch_argv routes it
+        # through COMSPEC. utf-8/replace decodes the reviewer's output safely.
+        proc = run_text(
+            argv, capture_output=True, timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
         return ReviewerResult(

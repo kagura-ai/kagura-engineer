@@ -41,6 +41,7 @@ import time
 import urllib.error
 import urllib.request
 
+from .._launch import run_text
 from .install import run_install, stderr_tail
 from .platform import OSKind, PkgManagerKind, PlatformInfo
 from .result import StepResult, StepStatus
@@ -302,9 +303,9 @@ def pull_ollama_models(
     # non-interactive; --no-input does not block this step.
     for model in missing:
         try:
-            proc = subprocess.run(
+            proc = run_text(
                 ["ollama", "pull", model],
-                capture_output=True, text=True, timeout=_PULL_TIMEOUT_S,
+                capture_output=True, timeout=_PULL_TIMEOUT_S,
             )
         except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired) as exc:
             return StepResult(

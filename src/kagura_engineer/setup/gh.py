@@ -25,6 +25,7 @@ import shutil
 import subprocess
 import time
 
+from .._launch import run_text
 from .install import stderr_tail
 from .platform import OSKind, PkgManagerKind, PlatformInfo
 from .result import StepResult, StepStatus
@@ -61,10 +62,9 @@ def _run_gh_status() -> subprocess.CompletedProcess:
     # `gh auth status` exits 0 when authenticated, 1 (sometimes 4) when
     # not. Output is on stdout; we don't currently parse it, but we
     # capture for the detail string.
-    return subprocess.run(
+    return run_text(
         ["gh", "auth", "status"],
         capture_output=True,
-        text=True,
         timeout=_STATUS_TIMEOUT_S,
     )
 
@@ -183,8 +183,8 @@ def ensure_gh_auth(
 
     # 4. Auto-install.
     try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=_INSTALL_TIMEOUT_S
+        proc = run_text(
+            cmd, capture_output=True, timeout=_INSTALL_TIMEOUT_S
         )
     except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired) as exc:
         return StepResult(
