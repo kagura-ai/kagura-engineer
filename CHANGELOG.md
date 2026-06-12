@@ -8,7 +8,18 @@ While the project is in `0.x`, minor versions may carry breaking changes.
 
 ## [Unreleased]
 
-## [0.3.3] — 2026-06-11
+## [0.4.0] — 2026-06-12
+
+### Added
+
+- `run` and `goal` now record which code-review provider/model the run actually
+  reviewed with — the brain's in-phase `/code-review` — and surface it in both
+  the human summary line and the `--json` `review` object. A run that halted
+  before the implement phase reviewed nothing, shown as `review: none ran` /
+  `"review": null` so it stays distinguishable. (#74)
+- The in-loop `/code-review` autonomous execution is now controllable from
+  `repo.yaml` with `auto` / `always` / `never`, letting operators tune whether
+  the implement phase runs an inner review pass. (#75)
 
 ### Fixed
 
