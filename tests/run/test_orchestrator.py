@@ -60,6 +60,12 @@ def _patch_boundaries(monkeypatch, *, blocking=False, phases=None, worktree=None
     monkeypatch.setattr(
         "kagura_engineer.run.lookup_pr_url", lambda wt: None, raising=False,
     )
+    # issue #80: after lookup finds no PR, the guard tries to push+open one. Default
+    # it to "couldn't recover" so a #18 test stays a FAIL and never shells out to
+    # real git/gh; the recovery test overrides this to return a URL.
+    monkeypatch.setattr(
+        "kagura_engineer.run.recover_open_pr", lambda wt, issue: None, raising=False,
+    )
 
 
 def test_status_exit_map():
@@ -792,9 +798,44 @@ def test_ship_green_no_url_marker_and_no_github_pr_stays_fail(monkeypatch):
     shas = iter(["before", "after"])
     monkeypatch.setattr("kagura_engineer.run.head_rev", lambda wt: next(shas))
     monkeypatch.setattr("kagura_engineer.run.lookup_pr_url", lambda wt: None)
+    # issue #80: be explicit that the recovery also can't open one (rather than
+    # leaning on the _patch_boundaries default) so the fail-secure invariant is
+    # visible right here.
+    monkeypatch.setattr("kagura_engineer.run.recover_open_pr", lambda wt, issue: None)
     report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
     assert report.status is RunStatus.FAIL
     assert report.phases[-1].name == "ship"
+
+
+# --- issue #80: a green ship that opened no PR is recovered by the orchestrator -
+
+
+def test_ship_green_no_pr_recovered_by_orchestrator_push(monkeypatch):
+    # issue #80: ship went green but stopped after the gate2 review without
+    # pushing / opening a PR. With no PR to look up, the orchestrator finishes the
+    # job (push + open) instead of halting a complete, gate-green run.
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "implement": PhaseInvocation("implement", 0, "", "", "green", None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", None),  # green, no pr_url
+    })
+    shas = iter(["before", "after"])  # implement produced a commit
+    monkeypatch.setattr("kagura_engineer.run.head_rev", lambda wt: next(shas))
+    monkeypatch.setattr("kagura_engineer.run.lookup_pr_url", lambda wt: None)
+    monkeypatch.setattr(
+        "kagura_engineer.run.recover_open_pr",
+        lambda wt, issue: "https://github.com/o/r/pull/80",
+    )
+    mem = _FakeMemory()
+    report = run_idea(_cfg(), 42, memory=mem, repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK
+    assert STATUS_EXIT[report.status] == 0
+    assert report.pr_url == "https://github.com/o/r/pull/80"
+    ship = next(p for p in report.phases if p.name == "ship")
+    assert ship.status is RunStatus.OK
+    assert "orchestrator" in ship.detail.lower()  # detail says we opened it
+    assert any(t == "savepoint" for t, _ in mem.remembered)  # persist ran
+    assert mem.state.get("run:42", {}).get("done") is True   # resume marker set
 
 
 def test_phase_fail_with_no_output_is_not_opaque(monkeypatch):
