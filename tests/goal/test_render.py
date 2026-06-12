@@ -24,7 +24,9 @@ def test_to_json_shape():
     assert data["status"] == "blocked"
     assert data["completed"] == 1
     assert data["total"] == 2
-    assert data["issues"][0] == {"issue": 1, "status": "ok", "pr_url": "https://x/pull/1"}
+    assert data["issues"][0] == {
+        "issue": 1, "status": "ok", "pr_url": "https://x/pull/1", "review": None,
+    }
 
 
 def test_print_table_runs(capsys):
@@ -50,3 +52,37 @@ def test_to_json_carries_profile():
 def test_to_json_profile_defaults_to_none():
     data = json.loads(to_json(_report()))
     assert data["profile"] is None
+
+
+def test_to_json_carries_per_issue_review():
+    # issue #74: each issue's actually-used review provider/model is recorded;
+    # an issue that halted before the code-review phase shows null.
+    from kagura_engineer.profile import ReviewProfile
+
+    report = GoalReport(
+        milestone="v0.3",
+        issues=[
+            RunReport(issue=1, pr_url="https://x/pull/1",
+                      review=ReviewProfile(provider="claude", model=None)),
+            RunReport(issue=2, phases=[PhaseResult("guard", RunStatus.BLOCKED, "x")]),
+        ],
+        status=RunStatus.BLOCKED,
+    )
+    data = json.loads(to_json(report))
+    assert data["issues"][0]["review"]["provider"] == "claude"
+    assert data["issues"][0]["review"]["via"] == "brain in-phase /code-review"
+    assert data["issues"][1]["review"] is None
+
+
+def test_print_table_shows_review(capsys):
+    # issue #74 AC2: the human milestone summary shows the reviewer per issue.
+    from kagura_engineer.profile import ReviewProfile
+
+    report = GoalReport(
+        milestone="v0.3",
+        issues=[RunReport(issue=1, pr_url="https://x/pull/1",
+                          review=ReviewProfile(provider="claude", model=None))],
+        status=RunStatus.OK,
+    )
+    print_table(report)
+    assert "claude" in capsys.readouterr().out

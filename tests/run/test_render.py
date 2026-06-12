@@ -48,3 +48,53 @@ def test_to_json_carries_profile():
 def test_to_json_profile_defaults_to_none():
     data = json.loads(to_json(RunReport(issue=1)))
     assert data["profile"] is None
+
+
+def test_to_json_review_defaults_to_none():
+    # issue #74: a run that never reached the code-review (implement) phase has
+    # no review record — null, distinguishable from a run that did review.
+    data = json.loads(to_json(RunReport(issue=1)))
+    assert data["review"] is None
+
+
+def test_to_json_carries_review_provider_and_model():
+    # issue #74: the actually-used review provider/model is recorded in the JSON.
+    from kagura_engineer.profile import ReviewProfile
+
+    report = RunReport(issue=1, review=ReviewProfile(provider="claude", model=None))
+    data = json.loads(to_json(report))
+    assert data["review"]["provider"] == "claude"
+    assert data["review"]["model"] is None
+    assert data["review"]["via"] == "brain in-phase /code-review"
+
+
+def test_print_table_shows_review_line():
+    # issue #74 AC2: the human summary shows which provider/model reviewed.
+    from kagura_engineer.profile import ReviewProfile
+    from kagura_engineer.run.render import print_table
+
+    import io
+    from contextlib import redirect_stdout
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        print_table(RunReport(
+            issue=1, phases=[PhaseResult("ship", RunStatus.OK, "PR opened")],
+            review=ReviewProfile(provider="claude", model=None),
+        ))
+    out = buf.getvalue()
+    assert "review:" in out
+    assert "claude" in out
+
+
+def test_print_table_shows_review_none_when_no_review():
+    # issue #74 AC3: the human summary makes "no review ran" explicit.
+    import io
+    from contextlib import redirect_stdout
+
+    from kagura_engineer.run.render import print_table
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        print_table(RunReport(issue=1, phases=[PhaseResult("guard", RunStatus.BLOCKED, "x")]))
+    assert "review: none ran" in buf.getvalue()

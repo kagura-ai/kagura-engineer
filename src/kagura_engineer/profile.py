@@ -24,7 +24,14 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from .config import Config
-from .run.brain_select import select_brain
+from .run.brain_select import BrainCall, select_brain
+
+# Where run/goal code review actually happens (issue #74). run/goal do NOT call
+# the standalone Ollama `review` command — they delegate code review to the
+# brain's in-phase `/code-review` during the implement phase, so the reviewer is
+# the resolved brain backend. Naming the path explicitly lets an auditor reading
+# the record tell which review surface produced the verdict.
+REVIEW_VIA_BRAIN = "brain in-phase /code-review"
 
 
 @dataclass(frozen=True)
@@ -101,3 +108,66 @@ def to_dict_or_none(profile: ExecutionProfile | None) -> dict | None:
     """Null-safe `to_dict` — the single embed form every report renderer uses
     (a report built outside the CLI carries no profile; render `null`)."""
     return to_dict(profile) if profile else None
+
+
+# --- ReviewProfile (issue #74) -----------------------------------------------
+
+
+@dataclass(frozen=True)
+class ReviewProfile:
+    """The code-review provider/model a run/goal actually reviewed with.
+
+    Operators could not tell, after the fact, which model reviewed a PR: the
+    profile's `reviewer_model`/`ollama_url` are CONFIG for the standalone Ollama
+    `review` command, which run/goal never call. run/goal delegate code review
+    to the brain's in-phase `/code-review`, so the reviewer is the resolved brain
+    backend at the brain endpoint — read off the same `BrainCall` the phases
+    execute with (`resolve_review_profile`), so the record can never diverge from
+    what ran (the profile.py SSOT principle).
+
+    The proposal's `effort`/`loops` fields are deliberately omitted: the brain
+    owns those internally and they are not observable from outside, and recording
+    unknowable fields would re-introduce the exact config-not-actual gap this
+    issue closes. `via` names the review surface so the record is self-describing
+    (and lets a future standalone-review record carry its own surface)."""
+
+    provider: str        # the brain backend that ran the review: "claude" | "codex"
+    model: str | None    # the brain endpoint, or None → backend default
+    via: str = REVIEW_VIA_BRAIN
+
+
+def resolve_review_profile(
+    brain_call: BrainCall, brain_endpoint: str | None
+) -> ReviewProfile:
+    """The review record for a run/goal — sourced from the resolved brain call.
+
+    `provider` is read off the `BrainCall` the phases execute with (never
+    re-derived from cfg), so it tracks what actually ran. `brain_endpoint` is the
+    only model-identifying info knowable for the delegated path (e.g. an
+    ollama-cloud gateway), so it is recorded as `model`; None → backend default.
+    """
+    return ReviewProfile(
+        provider=brain_call.backend,
+        model=brain_endpoint or None,
+    )
+
+
+def review_provider_model(review: ReviewProfile) -> str:
+    """The `provider @ model` core format — the single source for every renderer
+    (the run one-liner and the goal table cell); None-handling stays at each
+    call site because the wording differs per surface ("none ran" vs "—")."""
+    return f"{review.provider} @ {review.model or 'default'}"
+
+
+def review_render_line(review: ReviewProfile | None) -> str:
+    """The human one-liner for the review record. `None` is explicit — issue #74
+    AC3: a run where no code review ran is distinguishable from one that did."""
+    if review is None:
+        return "review: none ran"
+    return f"review: {review_provider_model(review)} (via {review.via})"
+
+
+def review_to_dict_or_none(review: ReviewProfile | None) -> dict | None:
+    """Null-safe dict form — the single embed every report renderer uses for the
+    `"review"` key (null when no code review ran)."""
+    return asdict(review) if review else None

@@ -6,6 +6,8 @@ import json
 from rich.console import Console
 from rich.table import Table
 
+from ..profile import review_render_line as _review_line
+from ..profile import review_to_dict_or_none as _review_dict
 from ..profile import to_dict_or_none as _profile_dict
 from .result import STATUS_ICON as _ICON, PhaseResult, RunReport
 
@@ -26,6 +28,7 @@ def to_json(report: RunReport) -> str:
             "issue": report.issue,
             "status": report.status.value,
             "profile": _profile_dict(report.profile),
+            "review": _review_dict(report.review),
             "pr_url": report.pr_url,
             "worktree": report.worktree,
             "resume_hint": report.resume_hint,
@@ -47,6 +50,9 @@ def print_table(report: RunReport) -> None:
         table.add_row(_ICON[p.status], p.name, p.status.value, p.verdict or "", p.detail)
     console = Console()
     console.print(table)
+    # issue #74: always print the review record (even "none ran") so the human
+    # summary answers "which provider/model reviewed this PR".
+    console.print(_review_line(report.review))
     if report.pr_url:
         console.print(f"PR: {report.pr_url}")
     if report.resume_hint:

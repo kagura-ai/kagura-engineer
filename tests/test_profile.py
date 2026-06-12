@@ -13,9 +13,14 @@ from kagura_brain import BRAIN_API_KEY_ENV
 
 from kagura_engineer.config import Config, ConfigError
 from kagura_engineer.profile import (
+    REVIEW_VIA_BRAIN,
     ExecutionProfile,
+    ReviewProfile,
     render_lines,
     resolve_profile,
+    resolve_review_profile,
+    review_render_line,
+    review_to_dict_or_none,
     to_dict,
 )
 from tests._constants import (
@@ -173,6 +178,61 @@ def test_render_lines_can_omit_brain_line():
     lines = render_lines(_profile(), brain=False)
     assert lines[0].startswith("reviewer:")
     assert not any(line.startswith("brain:") for line in lines)
+
+
+# --- ReviewProfile (issue #74) -----------------------------------------------
+
+
+class _FakeBrainCall:
+    def __init__(self, backend):
+        self.backend = backend
+
+
+def test_resolve_review_profile_claude_default_endpoint():
+    # run/goal delegate code review to the brain's in-phase /code-review, so the
+    # reviewer IS the resolved brain backend. A None endpoint renders as default.
+    rp = resolve_review_profile(_FakeBrainCall("claude"), None)
+    assert rp == ReviewProfile(provider="claude", model=None, via=REVIEW_VIA_BRAIN)
+
+
+def test_resolve_review_profile_carries_brain_endpoint_as_model():
+    # The brain endpoint is the only model-identifying info knowable for the
+    # delegated path (e.g. an ollama-cloud gateway via codex) — record it.
+    rp = resolve_review_profile(_FakeBrainCall("codex"), "ollama-cloud")
+    assert rp.provider == "codex"
+    assert rp.model == "ollama-cloud"
+
+
+def test_resolve_review_profile_reads_backend_off_the_brain_call():
+    # SSOT: provider must come from the resolved BrainCall the phases execute
+    # with, never re-derived — so it can never diverge from what ran.
+    rp = resolve_review_profile(_FakeBrainCall("sentinel-backend"), None)
+    assert rp.provider == "sentinel-backend"
+
+
+def test_review_render_line_none_is_explicit():
+    # issue #74 AC3: a run where no code review ran is distinguishable.
+    assert review_render_line(None) == "review: none ran"
+
+
+def test_review_render_line_golden():
+    assert (
+        review_render_line(ReviewProfile(provider="claude", model=None))
+        == "review: claude @ default (via brain in-phase /code-review)"
+    )
+    assert (
+        review_render_line(ReviewProfile(provider="codex", model="ollama-cloud"))
+        == "review: codex @ ollama-cloud (via brain in-phase /code-review)"
+    )
+
+
+def test_review_to_dict_or_none_golden():
+    assert review_to_dict_or_none(None) is None
+    assert review_to_dict_or_none(ReviewProfile(provider="claude", model=None)) == {
+        "provider": "claude",
+        "model": None,
+        "via": REVIEW_VIA_BRAIN,
+    }
 
 
 def test_to_dict_golden():
