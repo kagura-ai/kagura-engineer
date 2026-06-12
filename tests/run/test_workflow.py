@@ -665,6 +665,94 @@ def test_build_prompt_closes_link_only_on_ship():
     assert "Closes #" not in workflow.build_prompt("implement", 2, [])
 
 
+# --- issue #80: ship prompt makes push+PR the non-skippable terminal action ----
+
+
+def test_build_prompt_ship_mandates_push_and_pr():
+    # The ship session must not stop at the gate2 review (issue #80): the prompt
+    # demands push + `gh pr create` as the mandatory final action.
+    prompt = workflow.build_prompt("ship", 7, [])
+    assert "MANDATORY" in prompt
+    assert "gh pr create" in prompt
+    assert "KAGURA_PR_URL" in prompt
+
+
+def test_build_prompt_non_ship_phases_carry_no_push_mandate():
+    for phase in ("start", "implement"):
+        assert "MANDATORY" not in workflow.build_prompt(phase, 7, [])
+
+
+# --- issue #80: orchestrator pushes + opens a PR when a green ship left none ----
+
+
+def _fake_recover_run_text(
+    *, branch="80-feat/x", push_rc=0, title="Issue Title", title_rc=0,
+    create_out="https://github.com/o/r/pull/80", create_rc=0, calls=None,
+):
+    """A stand-in for workflow.run_text that dispatches by the git/gh subcommand,
+    so recover_open_pr can be driven without touching real git/gh."""
+    def _run(cmd, **kw):
+        if calls is not None:
+            calls.append(cmd)
+        if "rev-parse" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, f"{branch}\n", "")
+        if "push" in cmd:
+            return subprocess.CompletedProcess(cmd, push_rc, "", "" if push_rc == 0 else "denied")
+        if cmd[:2] == ["gh", "issue"]:
+            return subprocess.CompletedProcess(cmd, title_rc, f"{title}\n" if title_rc == 0 else "", "")
+        if cmd[:3] == ["gh", "pr", "create"]:
+            return subprocess.CompletedProcess(cmd, create_rc, f"{create_out}\n" if create_rc == 0 else "", "" if create_rc == 0 else "exists")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+    return _run
+
+
+def test_recover_open_pr_pushes_and_opens(monkeypatch, tmp_path):
+    calls: list = []
+    monkeypatch.setattr(workflow, "run_text", _fake_recover_run_text(calls=calls))
+    url = workflow.recover_open_pr(tmp_path, 80)
+    assert url == "https://github.com/o/r/pull/80"
+    assert any("push" in c for c in calls)  # it pushed the branch
+    create = next(c for c in calls if c[:3] == ["gh", "pr", "create"])
+    assert "--head" in create and "80-feat/x" in create
+    body = create[create.index("--body") + 1]
+    assert "Closes #80" in body
+    assert create[create.index("--title") + 1] == "Issue Title"
+
+
+def test_recover_open_pr_none_on_detached_head(monkeypatch, tmp_path):
+    monkeypatch.setattr(workflow, "run_text", _fake_recover_run_text(branch="HEAD"))
+    assert workflow.recover_open_pr(tmp_path, 80) is None
+
+
+def test_recover_open_pr_none_on_push_failure(monkeypatch, tmp_path):
+    monkeypatch.setattr(workflow, "run_text", _fake_recover_run_text(push_rc=1))
+    assert workflow.recover_open_pr(tmp_path, 80) is None
+
+
+def test_recover_open_pr_none_on_pr_create_failure(monkeypatch, tmp_path):
+    monkeypatch.setattr(workflow, "run_text", _fake_recover_run_text(create_rc=1))
+    assert workflow.recover_open_pr(tmp_path, 80) is None
+
+
+def test_recover_open_pr_title_falls_back_to_branch(monkeypatch, tmp_path):
+    calls: list = []
+    monkeypatch.setattr(
+        workflow, "run_text",
+        _fake_recover_run_text(title_rc=1, calls=calls),  # gh issue view fails
+    )
+    url = workflow.recover_open_pr(tmp_path, 80)
+    assert url == "https://github.com/o/r/pull/80"  # still opens the PR
+    create = next(c for c in calls if c[:3] == ["gh", "pr", "create"])
+    assert create[create.index("--title") + 1] == "80-feat/x"  # branch-name fallback
+
+
+def test_recover_open_pr_none_on_git_oserror(monkeypatch, tmp_path):
+    def _boom(cmd, **kw):
+        raise OSError("git not found")
+    monkeypatch.setattr(workflow, "run_text", _boom)
+    assert workflow.recover_open_pr(tmp_path, 80) is None
+
+
 def test_head_rev_none_for_non_git_dir(tmp_path):
     # Best-effort: a non-git path returns None rather than raising, so the
     # implement empty-commit check degrades to "skip" instead of crashing.

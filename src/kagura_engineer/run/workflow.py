@@ -243,6 +243,18 @@ def build_prompt(
                 "so merging the PR auto-closes the issue; if the PR already "
                 "exists without it, edit the body to add it.\n"
             )
+            # issue #80: the ship session sometimes treats the gate2 review as
+            # the terminal step and stops before push / `gh pr create`, leaving a
+            # green run with no PR. Make push + PR the explicit, non-skippable
+            # final action so the headless session does not end at the review.
+            body += (
+                "Pushing the branch and opening (or updating) the pull request via "
+                "`gh pr create` is the MANDATORY final action of this phase — the "
+                "gate2 review is NOT the end. Do not stop after the review: you MUST "
+                "push the branch and ensure the PR is open, then print the real "
+                "pull-request URL in the KAGURA_PR_URL line. The run is incomplete "
+                "until the PR exists.\n"
+            )
         verdict_hint = "KAGURA_VERDICT=<green|yellow|red>   (the phase gate verdict)\n"
     return (
         "You are running inside an automated kagura-engineer run.\n"
@@ -407,6 +419,93 @@ def lookup_pr_url(worktree: Path) -> str | None:
         return None
     url = data.get("url")
     return url if isinstance(url, str) and url else None
+
+
+# Pushing a branch / opening a PR is a network round-trip; generous but bounded
+# so a wedged git/gh can't stall the orchestrator (issue #80 recovery).
+_RECOVER_TIMEOUT_S = 60
+
+
+def recover_open_pr(worktree: Path, issue: int) -> str | None:
+    """Push the worktree branch and open a PR when a green ship left none (#80).
+
+    The #18 guard's last resort before FAIL. The implement commit is on the
+    branch and gate2 passed, but the headless ship session stopped after the
+    review and never reached `git push` / `gh pr create` — so the run (and,
+    under `goal`, the whole milestone) would halt on work that is actually
+    complete and gate-green. Rather than rely on the model re-running, the
+    orchestrator finishes the job: push the branch, then open a PR whose body
+    `Closes #<issue>`.
+
+    Only reached AFTER `lookup_pr_url` found no OPEN/MERGED PR, and `gh pr create`
+    itself refuses (non-zero) if an open PR already exists — so it does not open a
+    duplicate of a live PR. `git push -u` is idempotent if the branch is already
+    up. Best-effort: returns the new PR URL, or None on any failure (detached
+    HEAD, push denied, gh missing/unauthenticated, `gh pr create` failed) —
+    leaving the fail-secure #18 guard exactly as strict as before.
+    """
+    try:
+        head = run_text(
+            ["git", "-C", str(worktree), "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, timeout=_PR_LOOKUP_TIMEOUT_S,
+        )
+    except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
+        return None
+    if head.returncode != 0:
+        return None
+    branch = head.stdout.strip()
+    if not branch or branch == "HEAD":  # detached HEAD — no branch to push/PR
+        return None
+    try:
+        # No --force: a never-pushed branch needs a plain push; an already-pushed
+        # one fast-forwards. We never rewrite remote history here.
+        push = run_text(
+            ["git", "-C", str(worktree), "push", "-u", "origin", branch],
+            capture_output=True, timeout=_RECOVER_TIMEOUT_S,
+        )
+    except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
+        return None
+    if push.returncode != 0:
+        return None
+    # Title from the issue (best-effort); fall back to the branch name.
+    title = branch
+    try:
+        tp = run_text(
+            ["gh", "issue", "view", str(issue), "--json", "title", "-q", ".title"],
+            cwd=str(worktree), capture_output=True, timeout=_PR_LOOKUP_TIMEOUT_S,
+        )
+        if tp.returncode == 0 and tp.stdout.strip():
+            title = tp.stdout.strip()
+    except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
+        pass
+    body = (
+        f"Closes #{issue}\n\n"
+        "_Recovery PR opened by kagura-engineer: the ship phase finished green "
+        "but did not push the branch or open a PR (issue #80). The change was "
+        "validated through gate2 before this PR was created._"
+    )
+    try:
+        # No --base: gh targets the repo's default branch, which is exactly what
+        # the start phase branches feature work off of (config default_branch), so
+        # the recovery PR opens against the same base the normal ship would use.
+        created = run_text(
+            ["gh", "pr", "create", "--head", branch, "--title", title, "--body", body],
+            cwd=str(worktree), capture_output=True, timeout=_RECOVER_TIMEOUT_S,
+        )
+    except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
+        return None
+    if created.returncode != 0:
+        return None
+    # `gh pr create` prints the PR URL to stdout; take the last URL-shaped line so
+    # a leading notice line can't be mistaken for the URL. If a future gh silences
+    # it, the PR was still created — look it up rather than declaring FAIL on a PR
+    # we just opened.
+    url = next(
+        (ln.strip() for ln in reversed(created.stdout.splitlines())
+         if ln.strip().startswith("http")),
+        None,
+    )
+    return url or lookup_pr_url(worktree)
 
 
 def persist_phase_stdout(worktree: Path, inv: PhaseInvocation) -> Path | None:

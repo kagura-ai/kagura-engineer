@@ -40,6 +40,7 @@ from .workflow import (
     invoke_phase,
     lookup_pr_url,
     persist_phase_stdout,
+    recover_open_pr,
     scrub_stray_commit_subject,
 )
 
@@ -392,6 +393,23 @@ def run_idea(
                     phase, RunStatus.OK,
                     "ship ok (PR URL marker dropped; verified "
                     f"{recovered} on GitHub)",
+                    verdict=decision.verdict,
+                ))
+                continue
+            # issue #80: no existing PR — the ship session went green but stopped
+            # after the gate2 review without pushing / opening a PR. Rather than
+            # halt a complete, gate-green run (and, under `goal`, the whole
+            # milestone), finish the job: push the branch and open the PR
+            # ourselves. Best-effort; on any failure it returns None and the
+            # fail-secure FAIL below stands.
+            opened = recover_open_pr(wt, issue)
+            if opened:
+                pr_url = opened
+                _emit("↳ ship left no PR — pushed the branch and opened one")
+                _record(PhaseResult(
+                    phase, RunStatus.OK,
+                    "ship ok (ship phase opened no PR; orchestrator pushed the "
+                    f"branch and opened {opened})",
                     verdict=decision.verdict,
                 ))
                 continue
