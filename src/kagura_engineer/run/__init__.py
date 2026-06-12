@@ -35,7 +35,13 @@ from .gate import evaluate
 from .memory import MemoryClient, resolve_memory_client
 from .result import STATUS_ICON, PhaseResult, RunReport, RunStatus
 from .worktree import WorktreeError, ensure_worktree
-from .workflow import head_rev, invoke_phase, lookup_pr_url, persist_phase_stdout
+from .workflow import (
+    head_rev,
+    invoke_phase,
+    lookup_pr_url,
+    persist_phase_stdout,
+    scrub_stray_commit_subject,
+)
 
 if TYPE_CHECKING:
     from ..profile import ReviewProfile
@@ -348,16 +354,22 @@ def run_idea(
             )
         # issue #9: a green implement phase that left no commit is a clear,
         # named failure — not a confusing "ship red" downstream on an empty diff.
-        if phase == "implement" and head_before is not None and head_rev(wt) == head_before:
-            _record(PhaseResult(
-                phase, RunStatus.FAIL,
-                "implement produced no commit — design passed gate1 but no code "
-                "was written/committed, so there is nothing to ship",
-            ))
-            return _finish(
-                worktree=str(wt),
-                resume_hint=f"implement issue #{issue} on the branch and commit, then re-run `kagura-engineer run {issue}`",
-            )
+        if phase == "implement" and head_before is not None:
+            if head_rev(wt) == head_before:
+                _record(PhaseResult(
+                    phase, RunStatus.FAIL,
+                    "implement produced no commit — design passed gate1 but no code "
+                    "was written/committed, so there is nothing to ship",
+                ))
+                return _finish(
+                    worktree=str(wt),
+                    resume_hint=f"implement issue #{issue} on the branch and commit, then re-run `kagura-engineer run {issue}`",
+                )
+            # issue #79: the headless implement author occasionally prepends a
+            # stray lone-`@` line above the real subject; scrub it from the new
+            # commit before ship packages it (best-effort — never fails the run).
+            if scrub_stray_commit_subject(wt):
+                _emit("✎ scrubbed a stray '@' from the implement commit subject")
         pr_url = inv.pr_url or pr_url
         # issue #18: a green ship that produced no PR URL did not actually push a
         # branch / open a PR — the run has NOT reached a PR. Reporting OK / exit 0

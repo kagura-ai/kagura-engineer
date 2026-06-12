@@ -275,6 +275,74 @@ def head_rev(worktree: Path) -> str | None:
     return proc.stdout.strip() or None
 
 
+def strip_stray_commit_prefix(message: str) -> str:
+    """Drop a stray lone-``@`` marker line prepended above the real subject.
+
+    Issue #79: an autonomous implement run occasionally authors a commit whose
+    first line is a bare ``@`` (a template/marker artifact), pushing the real
+    summary down to line 2 and polluting ``git log`` / the PR commit list. This
+    removes a leading ``@`` line (plus any blank lines around it) so the real
+    subject rises to line 1.
+
+    Conservative by design — it only strips a line that is *exactly* ``@`` (after
+    trimming), never an ``@`` embedded in a real subject, and never when doing so
+    would leave the message empty (a commit whose only content is ``@`` is left
+    untouched rather than destroyed). Idempotent: a clean message is returned
+    unchanged.
+    """
+    lines = message.split("\n")
+    idx = 0
+    while idx < len(lines) and lines[idx].strip() == "":
+        idx += 1
+    if idx >= len(lines) or lines[idx].strip() != "@":
+        return message
+    drop = idx + 1
+    while drop < len(lines) and lines[drop].strip() == "":
+        drop += 1
+    remainder = lines[drop:]
+    if not any(line.strip() for line in remainder):
+        return message  # nothing real after the marker — don't destroy it
+    return "\n".join(remainder)
+
+
+def scrub_stray_commit_subject(worktree: Path) -> bool:
+    """Amend the worktree HEAD commit if its subject is a stray ``@`` (issue #79).
+
+    Runs after the implement phase confirms a new commit, before ship packages
+    it. Best-effort: returns ``True`` only when it actually amended, ``False``
+    otherwise (clean subject, or any git failure) — a scrub problem must never
+    fail an otherwise-green implement, so every error degrades to "leave it".
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(worktree), "log", "-1", "--format=%B"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
+        # UnicodeDecodeError: text=True decodes with the console codec (cp932 on
+        # Windows); a commit message with bytes invalid there must degrade to
+        # "leave it", never crash the run — same guard as lookup_pr_url.
+        return False
+    if proc.returncode != 0:
+        return False
+    original = proc.stdout
+    cleaned = strip_stray_commit_prefix(original.rstrip("\n"))
+    if cleaned == original.rstrip("\n"):
+        return False
+    try:
+        # --allow-empty: we are rewriting only the message; the real implement
+        # commit always has a tree change (#9 guard), but this keeps a pure
+        # message scrub from ever failing on an otherwise-empty commit.
+        amend = subprocess.run(
+            ["git", "-C", str(worktree), "commit", "--amend", "--allow-empty",
+             "-m", cleaned],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
+        return False
+    return amend.returncode == 0
+
+
 # `gh pr view` is a network call; generous but bounded so a wedged gh can't
 # stall the orchestrator (the phases themselves get 30 min, this gets 30 s).
 _PR_LOOKUP_TIMEOUT_S = 30
