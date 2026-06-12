@@ -51,6 +51,14 @@ context_id: ""
 
 # Ollama endpoint for the cost-free reviewer.
 ollama_url: "http://localhost:11434"
+
+# --- In-loop code review (run/goal implement phase) ---
+# code_review: auto | always | never — whether the brain runs /code-review over
+#   the diff (auto = brain decides from diff size / risk / tests; default).
+# effort: low | medium | high — the effort hint passed to /code-review.
+# review:
+#   code_review: auto
+#   effort: medium
 """
 
 

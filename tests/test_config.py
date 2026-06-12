@@ -146,6 +146,50 @@ def test_known_keys_still_accepted_under_forbid(tmp_path, valid_repo_yaml_text):
     assert cfg.memory_failover is False
 
 
+# --- review.code_review / review.effort (issue #75) --------------------------
+# repo.yaml frames the brain's in-phase /code-review during run/goal implement:
+# auto (brain decides from documented criteria), always (forced on), never
+# (forced off). `effort` is the effort hint passed to /code-review. Defaults
+# (auto/medium) keep the unspecified behaviour compatible with today.
+
+
+def test_review_code_review_defaults_to_auto(write_cfg):
+    cfg = load_config(write_cfg)
+    assert cfg.review.code_review == "auto"
+    assert cfg.review.effort == "medium"
+
+
+def test_review_code_review_accepts_always(tmp_path, valid_repo_yaml_text):
+    p = tmp_path / "repo.yaml"
+    p.write_text(valid_repo_yaml_text + "review:\n  code_review: always\n  effort: high\n")
+    cfg = load_config(p)
+    assert cfg.review.code_review == "always"
+    assert cfg.review.effort == "high"
+
+
+def test_review_code_review_accepts_never(tmp_path, valid_repo_yaml_text):
+    p = tmp_path / "repo.yaml"
+    p.write_text(valid_repo_yaml_text + "review:\n  code_review: never\n")
+    cfg = load_config(p)
+    assert cfg.review.code_review == "never"
+
+
+def test_review_code_review_rejects_unknown_value(tmp_path, valid_repo_yaml_text):
+    # The Literal["auto","always","never"] constraint: a typo'd value (e.g.
+    # "alway") must fail loudly at load time, not fall back to a silent default.
+    p = tmp_path / "repo.yaml"
+    p.write_text(valid_repo_yaml_text + "review:\n  code_review: alway\n")
+    with pytest.raises(ConfigError):
+        load_config(p)
+
+
+def test_review_effort_rejects_unknown_value(tmp_path, valid_repo_yaml_text):
+    p = tmp_path / "repo.yaml"
+    p.write_text(valid_repo_yaml_text + "review:\n  effort: maximum\n")
+    with pytest.raises(ConfigError):
+        load_config(p)
+
+
 def test_missing_file_raises(tmp_path):
     with pytest.raises(ConfigError):
         load_config(tmp_path / "nope.yaml")

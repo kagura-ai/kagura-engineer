@@ -598,6 +598,52 @@ def test_review_profile_none_when_implement_exits_nonzero(monkeypatch):
     assert report.review is None
 
 
+def test_review_profile_none_when_code_review_never(monkeypatch):
+    # issue #75: review.code_review="never" forbids the in-phase /code-review,
+    # so the #74 record must stay null ("review: none ran") — recording a
+    # reviewer for a review the policy forbade would be a fabrication.
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "implement": PhaseInvocation("implement", 0, "", "", "green", None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+    shas = iter(["before", "after"])
+    monkeypatch.setattr("kagura_engineer.run.head_rev", lambda wt: next(shas))
+    cfg = _cfg().model_copy(update={
+        "review": _cfg().review.model_copy(update={"code_review": "never"}),
+    })
+    report = run_idea(cfg, 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK
+    assert report.review is None
+
+
+def test_run_threads_review_policy_to_invoke_phase(monkeypatch):
+    # issue #75: repo.yaml's review.code_review/effort must reach invoke_phase
+    # (and thence the implement prompt) — config that never leaves run_idea
+    # would be a silent no-op.
+    _patch_boundaries(monkeypatch, phases={
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+    seen: list[dict] = []
+
+    def _invoke(phase, issue, worktree, grounding, **kw):
+        seen.append({"phase": phase, **kw})
+        return PhaseInvocation(phase, 0, "", "", "green",
+                               "https://x/pull/9" if phase == "ship" else None)
+
+    monkeypatch.setattr("kagura_engineer.run.invoke_phase", _invoke)
+    shas = iter(["before", "after"])
+    monkeypatch.setattr("kagura_engineer.run.head_rev", lambda wt: next(shas))
+    cfg = _cfg().model_copy(update={
+        "review": _cfg().review.model_copy(
+            update={"code_review": "always", "effort": "high"}),
+    })
+    run_idea(cfg, 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    implement = next(k for k in seen if k["phase"] == "implement")
+    assert implement["code_review"] == "always"
+    assert implement["review_effort"] == "high"
+
+
 def test_implement_no_commit_is_fail(monkeypatch):
     # implement ran green but produced NO commit → ship has nothing; fail clearly
     # at implement instead of the confusing "ship red" (issue #9).

@@ -97,6 +97,8 @@ memory_mcp_config: .mcp.json                       # optional: override the auto
 review:
   models: [qwen2.5-coder:7b, haiku]               # optional (default: [])
   max_loops: 3                                      # optional (default: 3)
+  code_review: auto                                 # optional: auto | always | never (default: auto)
+  effort: medium                                    # optional: low | medium | high (default: medium)
 ```
 
 `workspace_id → context_id → memory` is the Memory Cloud filter hierarchy.
@@ -234,6 +236,16 @@ code-review provider/model the run actually used — the brain's in-phase
 `/code-review`, so `provider` is the resolved brain backend at the brain
 endpoint. A run that halted before the implement phase reviewed nothing, shown
 as `review: none ran` / `"review": null` so it stays distinguishable.
+
+Whether that in-phase `/code-review` runs at all is framed by
+`review.code_review` in `repo.yaml`: `auto` (default) lets the brain decide —
+the implement prompt documents the criteria (run on large diffs, risk-bearing
+layers like auth/config-parsing/subprocess/persistence, or behaviour changes
+without tests; skip small mechanical/docs-only diffs) — while `always`/`never`
+force it on/off for repos that want CI-like reproducibility. `review.effort`
+(`low`/`medium`/`high`) is the effort hint passed to `/code-review`. Under
+`never` the report's `review` record stays `null` — the policy guaranteed no
+review ran.
 
 ### `kagura-engineer review`
 

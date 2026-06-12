@@ -33,6 +33,15 @@ class ReviewConfig(BaseModel):
 
     models: list[str] = Field(default_factory=list)
     max_loops: int = 3
+    # issue #75: policy frame for the brain's in-phase /code-review during the
+    # run/goal implement phase. "auto" (default — matches the historical
+    # behaviour) leaves the run/skip decision to the brain but documents the
+    # criteria in the prompt; "always"/"never" force it on/off for repos that
+    # want CI-like reproducibility. `effort` is the effort hint passed to
+    # /code-review when it runs. Both only shape the implement PROMPT — the
+    # standalone Ollama `review` command is untouched (models/max_loops above).
+    code_review: Literal["auto", "always", "never"] = "auto"
+    effort: Literal["low", "medium", "high"] = "medium"
 
 
 class Config(BaseModel):

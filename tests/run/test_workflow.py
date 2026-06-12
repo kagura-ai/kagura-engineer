@@ -92,6 +92,81 @@ def test_build_prompt_handles_empty_grounding():
     assert "/gh-issue-driven:ship" in prompt
 
 
+# --- implement-phase /code-review policy (issue #75) --------------------------
+# repo.yaml's review.code_review (auto|always|never) frames the brain's in-phase
+# /code-review: `always`/`never` force it on/off; `auto` (the default) leaves
+# the decision to the brain but documents the criteria in the prompt (diff
+# size, risky layers, tests present). review.effort is the /code-review effort
+# hint. Only the implement phase carries the directive — start/ship delegate to
+# gh-issue-driven skills and must stay untouched.
+
+
+def test_build_prompt_implement_auto_documents_decision_criteria():
+    # Default policy (auto): the brain decides, and the criteria it decides BY
+    # are documented in the prompt (issue #75 acceptance criterion 2).
+    prompt = workflow.build_prompt("implement", 7, [])
+    assert "/code-review" in prompt
+    assert "decide" in prompt.lower()
+    # The documented criteria: diff size, risky layers, tests.
+    assert "diff" in prompt.lower()
+    assert "test" in prompt.lower()
+
+
+def test_build_prompt_implement_always_forces_review():
+    prompt = workflow.build_prompt("implement", 7, [], code_review="always")
+    assert "MUST run" in prompt
+    assert "/code-review" in prompt
+
+
+def test_build_prompt_implement_never_forbids_review():
+    prompt = workflow.build_prompt("implement", 7, [], code_review="never")
+    assert "do NOT run" in prompt
+    assert "/code-review" in prompt
+    assert "MUST run" not in prompt
+
+
+def test_build_prompt_implement_threads_effort():
+    prompt = workflow.build_prompt(
+        "implement", 7, [], code_review="always", review_effort="high"
+    )
+    assert "high" in prompt
+
+
+def test_build_prompt_auto_threads_effort():
+    prompt = workflow.build_prompt("implement", 7, [], review_effort="low")
+    assert "low" in prompt
+
+
+def test_build_prompt_non_implement_phases_carry_no_review_directive():
+    # start/ship run gh-issue-driven skills — the policy must not leak there,
+    # whatever its value.
+    for phase in ("start", "ship"):
+        for policy in ("auto", "always", "never"):
+            prompt = workflow.build_prompt(phase, 7, [], code_review=policy)
+            assert "/code-review" not in prompt
+
+
+def test_invoke_phase_threads_review_policy_into_prompt(tmp_path):
+    capture: dict = {}
+    call = _fake_brain_call(stdout="KAGURA_VERDICT=green", capture=capture)
+    workflow.invoke_phase(
+        "implement", 7, tmp_path, [], brain_call=call,
+        code_review="never",
+    )
+    assert "do NOT run" in capture["prompt"]
+
+
+def test_invoke_phase_review_policy_defaults_to_auto(tmp_path):
+    # Backward-compat: callers that omit the policy get auto — the prompt
+    # carries the documented decision criteria, not a forced on/off.
+    capture: dict = {}
+    call = _fake_brain_call(stdout="KAGURA_VERDICT=green", capture=capture)
+    workflow.invoke_phase("implement", 7, tmp_path, [], brain_call=call)
+    assert "/code-review" in capture["prompt"]
+    assert "MUST run" not in capture["prompt"]
+    assert "do NOT run" not in capture["prompt"]
+
+
 def test_parse_verdict_reads_last_marker():
     text = "blah\nKAGURA_VERDICT=green\nmore\nKAGURA_VERDICT=red\n"
     assert workflow.parse_verdict(text) == "red"

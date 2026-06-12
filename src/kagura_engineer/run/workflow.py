@@ -153,6 +153,7 @@ def build_prompt(
     unattended: bool = False, mcp_enabled: bool = False,
     mcp_tools: tuple[str, str] = MEMORY_TOOLS,
     branch_override: str | None = None,
+    code_review: str = "auto", review_effort: str = "medium",
 ) -> str:
     context = "\n".join(f"- {g}" for g in grounding) or "- (no prior memory)"
     # Unattended dials the delegated skill's HITL down: it proceeds on green/
@@ -192,6 +193,34 @@ def build_prompt(
             "inside it. Run the test suite until green, then COMMIT to the branch "
             "(an uncommitted or empty implementation cannot be shipped).\n"
         )
+        # issue #75: repo.yaml's review.code_review policy frames the brain's
+        # in-phase /code-review. The directive is implement-only — start/ship
+        # delegate to gh-issue-driven skills that own their own review gates.
+        if code_review == "always":
+            body += (
+                "After the tests are green and the work is committed, you MUST "
+                f"run the `/code-review` skill (effort: {review_effort}) over "
+                "the branch's diff and fix any findings it raises before "
+                "finishing.\n"
+            )
+        elif code_review == "never":
+            body += (
+                "This repository disables the in-phase code review "
+                "(review.code_review: never) — do NOT run the `/code-review` "
+                "skill in this phase.\n"
+            )
+        else:  # auto — the brain decides, by these documented criteria.
+            body += (
+                "After the tests are green and the work is committed, decide "
+                "autonomously whether to run the `/code-review` skill (effort: "
+                f"{review_effort}) over the branch's diff. Run it when ANY of "
+                "these hold: the diff is large (roughly 150+ changed lines), it "
+                "touches risk-bearing layers (auth/security, config parsing, "
+                "subprocess/orchestration, data persistence), or it changes "
+                "behaviour without adding or updating tests. Skip it for small "
+                "mechanical or docs-only diffs the test suite already covers. "
+                "If you run it, fix any findings it raises before finishing.\n"
+            )
         verdict_hint = (
             "KAGURA_VERDICT=<green|yellow|red>   "
             "(green = implemented, tests green, committed)\n"
@@ -382,11 +411,13 @@ def invoke_phase(
     *, brain_call: BrainCall, unattended: bool = False,
     mcp_config: str | None = None, timeout: int = _PHASE_TIMEOUT_S,
     branch_override: str | None = None,
+    code_review: str = "auto", review_effort: str = "medium",
 ) -> PhaseInvocation:
     prompt = build_prompt(phase, issue, grounding, unattended=unattended,
                           mcp_enabled=brain_call.mcp_enabled(mcp_config),
                           mcp_tools=memory_tool_ids(brain_call.backend),
-                          branch_override=branch_override)
+                          branch_override=branch_override,
+                          code_review=code_review, review_effort=review_effort)
     # The headless launcher lives in the resolved kagura-brain backend adapter
     # (#40/#51), reached via brain_call: it owns the single launcher seam and
     # strips stale provider auth env (e.g. ANTHROPIC_API_KEY) so subscription
