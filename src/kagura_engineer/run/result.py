@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..profile import ExecutionProfile
+    from ..profile import ExecutionProfile, ReviewProfile
 
 
 class RunStatus(enum.Enum):
@@ -61,6 +61,11 @@ class RunReport:
     # issue #70: the resolved ExecutionProfile this run executed with —
     # attached by the CLI (dataclasses.replace) and serialised by render.to_json.
     profile: ExecutionProfile | None = None
+    # issue #74: the code-review provider/model this run actually reviewed with
+    # (the brain's in-phase /code-review). Set by run_idea once the implement
+    # phase runs; None when the run halted before reaching code review — so a
+    # "no review ran" run is distinguishable in the report.
+    review: ReviewProfile | None = None
 
     @property
     def status(self) -> RunStatus:

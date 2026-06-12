@@ -229,6 +229,12 @@ kagura-engineer run 42 --json
 Exit codes: `0` PR reached · `1` hard fail · `2` blocked (guard or gate
 halt — resumable by re-running).
 
+The report (final summary line and the `--json` `review` object) records which
+code-review provider/model the run actually used — the brain's in-phase
+`/code-review`, so `provider` is the resolved brain backend at the brain
+endpoint. A run that halted before the implement phase reviewed nothing, shown
+as `review: none ran` / `"review": null` so it stays distinguishable.
+
 ### `kagura-engineer review`
 
 Launches the separate [`kagura-code-reviewer`](https://github.com/kagura-ai/kagura-code-reviewer)

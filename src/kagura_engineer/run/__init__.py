@@ -26,7 +26,7 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from ..config import Config, ConfigError
 from ..doctor.registry import run_all
@@ -36,6 +36,9 @@ from .memory import MemoryClient, resolve_memory_client
 from .result import STATUS_ICON, PhaseResult, RunReport, RunStatus
 from .worktree import WorktreeError, ensure_worktree
 from .workflow import head_rev, invoke_phase, lookup_pr_url, persist_phase_stdout
+
+if TYPE_CHECKING:
+    from ..profile import ReviewProfile
 
 _log = logging.getLogger(__name__)
 
@@ -132,6 +135,10 @@ def run_idea(
     root = repo_root if repo_root is not None else Path.cwd()
     started = time.monotonic()
     phases: list[PhaseResult] = []
+    # issue #74: the code-review record. Stays None until the run reaches the
+    # implement phase (where the brain runs its in-phase /code-review), so a run
+    # that halts at guard/recall/worktree or the design gate reports no review.
+    review_prof: ReviewProfile | None = None
 
     # issue #12: single chokepoint — every recorded phase streams an exit line, so
     # the operator sees progress incrementally instead of a blank screen until the
@@ -161,6 +168,7 @@ def run_idea(
         return RunReport(
             issue=issue, phases=phases, pr_url=pr_url, worktree=worktree,
             resume_hint=resume_hint, duration_s=time.monotonic() - started,
+            review=review_prof,
         )
 
     # Failover: replay any writes buffered during a prior Cloud outage before we
@@ -274,6 +282,15 @@ def run_idea(
         # actually committed anything (a green design with no code leaves ship
         # nothing to package). None (unreadable) → degrade to skipping the check.
         head_before = head_rev(wt) if phase == "implement" else None
+        # issue #74: the implement phase is where the brain runs its in-phase
+        # /code-review, so record the reviewer here — read off the resolved
+        # brain_call so the record tracks what actually ran. Runs that halt
+        # before implement leave review_prof None (no code review happened).
+        if phase == "implement":
+            # Local import: profile imports run.brain_select at module load, so a
+            # top-level import here would close a circular-import loop.
+            from ..profile import resolve_review_profile
+            review_prof = resolve_review_profile(brain_call, cfg.brain_endpoint)
         try:
             inv = invoke_phase(phase, issue, wt, grounding, brain_call=brain_call,
                                unattended=unattended,

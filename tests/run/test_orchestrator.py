@@ -530,6 +530,41 @@ def test_phase_sequence_includes_implement(monkeypatch):
         ["guard", "recall", "worktree", "start", "implement", "ship", "persist"]
 
 
+def test_review_profile_recorded_once_implement_runs(monkeypatch):
+    # issue #74: run/goal delegate code review to the brain's in-phase
+    # /code-review, so once the implement phase runs the report records the
+    # reviewer (the resolved brain backend — "claude" with the test config).
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "implement": PhaseInvocation("implement", 0, "", "", "green", None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+    shas = iter(["before", "after"])
+    monkeypatch.setattr("kagura_engineer.run.head_rev", lambda wt: next(shas))
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.review is not None
+    assert report.review.provider == "claude"
+    assert report.review.via == "brain in-phase /code-review"
+
+
+def test_review_profile_none_when_halted_before_implement(monkeypatch):
+    # issue #74 AC3: a run halted at the design gate (start) never reached the
+    # code-review phase — its review record is null, not a fabricated reviewer.
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "red", None),
+    })
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.BLOCKED
+    assert report.review is None
+
+
+def test_review_profile_none_when_guard_blocks(monkeypatch):
+    # A run blocked at guard never resolved a brain → no review record.
+    _patch_boundaries(monkeypatch, blocking=True)
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.review is None
+
+
 def test_implement_no_commit_is_fail(monkeypatch):
     # implement ran green but produced NO commit → ship has nothing; fail clearly
     # at implement instead of the confusing "ship red" (issue #9).
