@@ -288,7 +288,12 @@ def run_idea(
                                mcp_config=cfg.resolve_mcp_config(root),
                                # only start CREATES the branch; implement/ship
                                # follow the worktree's current branch.
-                               branch_override=branch_override if phase == "start" else None)
+                               branch_override=branch_override if phase == "start" else None,
+                               # issue #75: repo.yaml's in-phase /code-review
+                               # policy + effort hint (shapes the implement
+                               # prompt only — see build_prompt).
+                               code_review=cfg.review.code_review,
+                               review_effort=cfg.review.effort)
         except (OSError, ValueError) as exc:
             # ValueError: the codex adapter parses mcp_config itself and raises
             # on a missing/non-JSON file (a stale memory_mcp_config path) — a
@@ -320,7 +325,11 @@ def run_idea(
         # completed (a launch failure or non-zero exit above never reviewed, so
         # those paths leave review_prof None). Read off the resolved brain_call
         # so the record tracks what actually ran.
-        if phase == "implement":
+        # issue #75: under review.code_review="never" the prompt forbids the
+        # in-phase /code-review, so recording a reviewer would fabricate a
+        # review that policy guaranteed never ran — leave the record null
+        # ("review: none ran"). auto/always keep the #74 record.
+        if phase == "implement" and cfg.review.code_review != "never":
             # Local import: profile imports run.brain_select at module load, so a
             # top-level import here would close a circular-import loop.
             from ..profile import resolve_review_profile
