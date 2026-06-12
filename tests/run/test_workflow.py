@@ -682,6 +682,111 @@ def test_head_rev_returns_sha_for_repo(tmp_path):
     assert sha and len(sha) >= 7
 
 
+# --- issue #79: scrub a stray leading `@` from the implement commit subject ----
+
+
+def test_strip_stray_commit_prefix_drops_lone_at_above_subject():
+    # The reported artifact: a lone `@` on line 1 pushes the real subject down.
+    msg = "@\ndocs: codify the contract (#19)\n\nbody paragraph"
+    assert workflow.strip_stray_commit_prefix(msg) == (
+        "docs: codify the contract (#19)\n\nbody paragraph"
+    )
+
+
+def test_strip_stray_commit_prefix_drops_leading_blanks_then_at():
+    msg = "\n\n@\n\nreal subject\n\nbody"
+    assert workflow.strip_stray_commit_prefix(msg) == "real subject\n\nbody"
+
+
+def test_strip_stray_commit_prefix_leaves_clean_message_unchanged():
+    msg = "fix: real subject\n\nbody with detail"
+    assert workflow.strip_stray_commit_prefix(msg) == msg
+
+
+def test_strip_stray_commit_prefix_is_idempotent():
+    once = workflow.strip_stray_commit_prefix("@\nfix: x\n\nbody")
+    assert workflow.strip_stray_commit_prefix(once) == once
+
+
+def test_strip_stray_commit_prefix_drops_multiple_consecutive_at():
+    # code-review #81: a single pass must not leave a second `@` as the subject
+    # (else scrub amends to subject `@` yet reports success).
+    assert workflow.strip_stray_commit_prefix("@\n@\nfeat: x\n\nbody") == (
+        "feat: x\n\nbody"
+    )
+    assert workflow.strip_stray_commit_prefix("@\n\n@\nfeat: x") == "feat: x"
+
+
+def test_strip_stray_commit_prefix_keeps_at_inside_real_subject():
+    # A subject that legitimately contains `@` (not a lone marker line) is kept.
+    msg = "fix: handle @mention parsing\n\nbody"
+    assert workflow.strip_stray_commit_prefix(msg) == msg
+
+
+def test_strip_stray_commit_prefix_keeps_lone_at_with_no_real_content():
+    # Pathological: stripping would destroy the only content — leave it be.
+    assert workflow.strip_stray_commit_prefix("@") == "@"
+    assert workflow.strip_stray_commit_prefix("@\n\n  ") == "@\n\n  "
+
+
+def _init_repo(tmp_path):
+    # A real worktree always carries a committer identity, so configure the repo
+    # itself (not per-command -c) — `scrub_stray_commit_subject`'s `--amend` must
+    # succeed without injecting identity, the way it does in a real clone.
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@e"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
+
+
+def _commit(tmp_path, message):
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-m", message],
+        cwd=tmp_path, check=True, capture_output=True,
+    )
+
+
+def _head_body(tmp_path) -> str:
+    out = subprocess.run(
+        ["git", "log", "-1", "--format=%B"],
+        cwd=tmp_path, check=True, capture_output=True, text=True,
+    )
+    return out.stdout
+
+
+def test_scrub_stray_commit_subject_amends_when_stray(tmp_path):
+    _init_repo(tmp_path)
+    _commit(tmp_path, "@\ndocs: real subject (#19)\n\naudit finding E1")
+    assert workflow.scrub_stray_commit_subject(tmp_path) is True
+    body = _head_body(tmp_path)
+    assert body.startswith("docs: real subject (#19)")
+    assert "audit finding E1" in body  # body preserved
+    assert "@" not in body.splitlines()[0]
+
+
+def test_scrub_stray_commit_subject_noop_on_clean_commit(tmp_path):
+    _init_repo(tmp_path)
+    _commit(tmp_path, "fix: real subject\n\nbody")
+    before = workflow.head_rev(tmp_path)
+    assert workflow.scrub_stray_commit_subject(tmp_path) is False
+    assert workflow.head_rev(tmp_path) == before  # no amend → same sha
+
+
+def test_scrub_stray_commit_subject_best_effort_on_non_git(tmp_path):
+    # No git repo → returns False rather than raising (never fails the run).
+    assert workflow.scrub_stray_commit_subject(tmp_path) is False
+
+
+def test_scrub_stray_commit_subject_best_effort_on_undecodable_output(monkeypatch, tmp_path):
+    # Never-raise contract: `git log --format=%B` under text=True decodes with the
+    # console codec (cp932 on Windows); a message with bytes invalid there raises
+    # UnicodeDecodeError (a ValueError, NOT a SubprocessError) — it must degrade to
+    # False, not escape and fail an otherwise-green implement.
+    def _boom(*a, **k):
+        raise UnicodeDecodeError("cp932", b"\xff", 0, 1, "illegal multibyte sequence")
+    monkeypatch.setattr(workflow.subprocess, "run", _boom)
+    assert workflow.scrub_stray_commit_subject(tmp_path) is False
+
+
 # --- persist child stdout on a (ship) FAIL for diagnosis (issue #38) ----------
 
 
