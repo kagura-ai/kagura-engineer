@@ -708,6 +708,15 @@ def test_strip_stray_commit_prefix_is_idempotent():
     assert workflow.strip_stray_commit_prefix(once) == once
 
 
+def test_strip_stray_commit_prefix_drops_multiple_consecutive_at():
+    # code-review #81: a single pass must not leave a second `@` as the subject
+    # (else scrub amends to subject `@` yet reports success).
+    assert workflow.strip_stray_commit_prefix("@\n@\nfeat: x\n\nbody") == (
+        "feat: x\n\nbody"
+    )
+    assert workflow.strip_stray_commit_prefix("@\n\n@\nfeat: x") == "feat: x"
+
+
 def test_strip_stray_commit_prefix_keeps_at_inside_real_subject():
     # A subject that legitimately contains `@` (not a lone marker line) is kept.
     msg = "fix: handle @mention parsing\n\nbody"

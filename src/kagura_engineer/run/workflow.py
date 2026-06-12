@@ -292,14 +292,18 @@ def strip_stray_commit_prefix(message: str) -> str:
     """
     lines = message.split("\n")
     idx = 0
-    while idx < len(lines) and lines[idx].strip() == "":
+    stray = 0
+    # Skip the leading run of blank-or-lone-`@` lines. Counting `@` lines (not
+    # just the first) makes the strip idempotent against a multi-`@` artifact
+    # (`@\n@\nsubject`) — otherwise a second `@` would survive as the subject and
+    # the caller would still report "scrubbed".
+    while idx < len(lines) and lines[idx].strip() in ("", "@"):
+        if lines[idx].strip() == "@":
+            stray += 1
         idx += 1
-    if idx >= len(lines) or lines[idx].strip() != "@":
-        return message
-    drop = idx + 1
-    while drop < len(lines) and lines[drop].strip() == "":
-        drop += 1
-    remainder = lines[drop:]
+    if stray == 0:
+        return message  # no stray `@` at the head — leave it (e.g. `@` inside a real subject)
+    remainder = lines[idx:]
     if not any(line.strip() for line in remainder):
         return message  # nothing real after the marker — don't destroy it
     return "\n".join(remainder)
@@ -325,9 +329,9 @@ def scrub_stray_commit_subject(worktree: Path) -> bool:
         return False
     if proc.returncode != 0:
         return False
-    original = proc.stdout
-    cleaned = strip_stray_commit_prefix(original.rstrip("\n"))
-    if cleaned == original.rstrip("\n"):
+    original = proc.stdout.rstrip("\n")
+    cleaned = strip_stray_commit_prefix(original)
+    if cleaned == original:
         return False
     try:
         # --allow-empty: we are rewriting only the message; the real implement
