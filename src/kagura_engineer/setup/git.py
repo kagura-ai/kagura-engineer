@@ -24,6 +24,7 @@ import shutil
 import subprocess
 import time
 
+from .._launch import run_text
 from .install import stderr_tail
 from .platform import OSKind, PkgManagerKind, PlatformInfo
 from .result import StepResult, StepStatus
@@ -118,8 +119,8 @@ def ensure_git(
 
     # 4. Auto-install path.
     try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=_INSTALL_TIMEOUT_S
+        proc = run_text(
+            cmd, capture_output=True, timeout=_INSTALL_TIMEOUT_S
         )
     except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired) as exc:
         return StepResult(

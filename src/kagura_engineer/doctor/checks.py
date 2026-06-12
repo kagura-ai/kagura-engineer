@@ -11,6 +11,7 @@ import urllib.request
 from pathlib import Path
 
 from .._http import build_request
+from .._launch import run_text
 from ..setup.auth import AuthMethod, resolve_anthropic_auth
 from ..setup.memory_auth import MemoryAuthMethod, resolve_memory_cloud_auth
 from ..setup.ollama import model_present
@@ -20,7 +21,10 @@ _TIMEOUT = 5
 
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=_TIMEOUT)
+    # issue #78: route through run_text so a Windows `.cmd` shim (claude/codex via
+    # npm) resolves through COMSPEC instead of raising WinError 2, and child output
+    # is decoded UTF-8/replace so a cp932 console can't crash the reader thread.
+    return run_text(cmd, capture_output=True, timeout=_TIMEOUT)
 
 
 def check_git() -> CheckResult:

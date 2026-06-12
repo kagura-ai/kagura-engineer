@@ -44,7 +44,9 @@ def test_claude_present_with_subscription_cache_is_ok(monkeypatch, tmp_path):
 
 def test_claude_present_with_env_key_is_ok(monkeypatch, tmp_path):
     monkeypatch.setattr(claude_setup.shutil, "which", lambda n: "/usr/bin/claude" if n == "claude" else None)
-    monkeypatch.setattr(os, "environ", {"ANTHROPIC_API_KEY": "sk-ant-test"}, raising=False)
+    # setenv (not replacing os.environ wholesale): wiping the environ drops
+    # SYSTEMROOT/COMSPEC etc. and raises on native Windows (issue #78 test surface).
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     r = ensure_claude_login(no_input=False, dry_run=False)
     assert r.status is StepStatus.OK
 

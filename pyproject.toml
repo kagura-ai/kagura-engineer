@@ -46,7 +46,9 @@ dependencies = [
     # stale-ANTHROPIC_API_KEY strip (#34), shared across harnesses. `select`
     # (the generic claude/codex dispatch we retired our own copy of) needs >=0.3;
     # we build on 0.4's selector + BRAIN_API_KEY_ENV + fail-closed BrainHandle.
-    "kagura-brain>=0.4.0,<0.5",
+    # >=0.4.1 carries the Windows `.cmd`-shim launch fix (core._run / _launch_argv,
+    # brain #17) so a fresh install is launchable on native Windows (issue #78-B).
+    "kagura-brain>=0.4.1,<0.5",
 ]
 
 [project.optional-dependencies]

@@ -36,6 +36,7 @@ import shutil
 import subprocess
 import time
 
+from .._launch import run_text
 from .platform import OSKind, PlatformInfo
 from .result import StepResult, StepStatus
 
@@ -127,8 +128,8 @@ def run_install(
         )
 
     try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout_s
+        proc = run_text(
+            cmd, capture_output=True, timeout=timeout_s
         )
     except subprocess.TimeoutExpired as exc:
         return StepResult(

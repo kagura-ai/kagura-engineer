@@ -8,11 +8,13 @@ def test_version_exposed():
     assert kagura_engineer.__version__ == "0.4.0"
 
 
-def test_kagura_brain_pinned_to_0_4_plus():
+def test_kagura_brain_pinned_to_0_4_1_plus():
     # `select()`/`BrainHandle`/`BRAIN_API_KEY_ENV` (#63) need kagura-brain >= 0.4.0;
-    # older pins lack the selector API (and `<0.2` also excluded brain #11's
-    # CLAUDE_* security scrub).
-    data = tomllib.loads(Path("pyproject.toml").read_text())
+    # 0.4.1 adds the Windows `.cmd`-shim launch fix (core._run / _launch_argv,
+    # brain #17) so a fresh install is launchable on native Windows (issue #78-B).
+    # read_text needs encoding="utf-8": pyproject carries non-ASCII and a cp932
+    # default codec would crash this test on a Japanese Windows console (#78-C).
+    data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
     deps = data["project"]["dependencies"]
     brain = [d for d in deps if d.replace(" ", "").startswith("kagura-brain")]
-    assert brain == ["kagura-brain>=0.4.0,<0.5"], brain
+    assert brain == ["kagura-brain>=0.4.1,<0.5"], brain

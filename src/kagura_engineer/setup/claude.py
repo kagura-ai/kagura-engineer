@@ -34,6 +34,7 @@ import shutil
 import subprocess
 import time
 
+from .._launch import run_text
 from .auth import AuthMethod, resolve_anthropic_auth
 from .install import stderr_tail
 from .result import StepResult, StepStatus
@@ -73,10 +74,9 @@ def _install_claude() -> StepResult | None:
     # On Windows v1 (no auto-install) we never reach here.
     script = f"set -o pipefail; curl -fsSL {INSTALL_URL} | bash"
     try:
-        proc = subprocess.run(
+        proc = run_text(
             ["bash", "-c", script],
             capture_output=True,
-            text=True,
             timeout=_INSTALL_TIMEOUT_S,
         )
     except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired) as exc:

@@ -83,6 +83,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from .._launch import run_text
 from ..mcp import MEMORY_TOOLS, memory_tool_ids
 from .brain_select import BrainCall
 
@@ -267,8 +268,12 @@ def head_rev(worktree: Path) -> str | None:
         proc = subprocess.run(
             ["git", "-C", str(worktree), "rev-parse", "HEAD"],
             capture_output=True, text=True, timeout=10,
+            encoding="utf-8", errors="replace",
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
+        # UnicodeDecodeError: text mode decodes with the console codec (cp932 on
+        # Windows); a sibling of lookup_pr_url's guard (issue #78). errors=replace
+        # also keeps a stray byte from crashing the reader thread.
         return None
     if proc.returncode != 0:
         return None
@@ -298,9 +303,14 @@ def lookup_pr_url(worktree: Path) -> str | None:
     the fail-secure #18 guard exactly as strict as before.
     """
     try:
-        proc = subprocess.run(
+        # run_text (issue #78): on Windows `gh` is a `.cmd` shim — a bare
+        # subprocess.run raises WinError 2 (caught as OSError → None), which would
+        # silently disable this #64 cross-check on every Windows run. Routing
+        # through launch_argv keeps the guard working; utf-8/replace also avoids a
+        # cp932 decode crash on a non-ASCII PR title.
+        proc = run_text(
             ["gh", "pr", "view", "--json", "url,state"],
-            cwd=str(worktree), capture_output=True, text=True,
+            cwd=str(worktree), capture_output=True,
             timeout=_PR_LOOKUP_TIMEOUT_S,
         )
     except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
