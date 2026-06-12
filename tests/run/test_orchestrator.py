@@ -565,6 +565,39 @@ def test_review_profile_none_when_guard_blocks(monkeypatch):
     assert report.review is None
 
 
+def test_review_profile_none_when_implement_fails_to_launch(monkeypatch):
+    # issue #74 /code-review finding: an implement phase that never launched
+    # (e.g. claude binary missing → OSError) reviewed nothing — the record must
+    # stay null, not a fabricated reviewer read off the brain call.
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+    })
+
+    def _invoke(phase, issue, worktree, grounding, **kw):
+        if phase == "implement":
+            raise OSError("claude binary missing")
+        return PhaseInvocation(phase, 0, "", "", "green", None)
+
+    monkeypatch.setattr("kagura_engineer.run.invoke_phase", _invoke)
+    monkeypatch.setattr("kagura_engineer.run.head_rev", lambda wt: None)
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.FAIL
+    assert report.review is None
+
+
+def test_review_profile_none_when_implement_exits_nonzero(monkeypatch):
+    # issue #74 /code-review finding: an implement phase that exited non-zero
+    # cannot be assumed to have run its in-phase /code-review — fail safe: null.
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "implement": PhaseInvocation("implement", 1, "", "boom", None, None),
+    })
+    monkeypatch.setattr("kagura_engineer.run.head_rev", lambda wt: None)
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.FAIL
+    assert report.review is None
+
+
 def test_implement_no_commit_is_fail(monkeypatch):
     # implement ran green but produced NO commit → ship has nothing; fail clearly
     # at implement instead of the confusing "ship red" (issue #9).

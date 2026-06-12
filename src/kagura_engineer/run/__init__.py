@@ -282,15 +282,6 @@ def run_idea(
         # actually committed anything (a green design with no code leaves ship
         # nothing to package). None (unreadable) → degrade to skipping the check.
         head_before = head_rev(wt) if phase == "implement" else None
-        # issue #74: the implement phase is where the brain runs its in-phase
-        # /code-review, so record the reviewer here — read off the resolved
-        # brain_call so the record tracks what actually ran. Runs that halt
-        # before implement leave review_prof None (no code review happened).
-        if phase == "implement":
-            # Local import: profile imports run.brain_select at module load, so a
-            # top-level import here would close a circular-import loop.
-            from ..profile import resolve_review_profile
-            review_prof = resolve_review_profile(brain_call, cfg.brain_endpoint)
         try:
             inv = invoke_phase(phase, issue, wt, grounding, brain_call=brain_call,
                                unattended=unattended,
@@ -324,6 +315,16 @@ def run_idea(
                 f"{brain_call.backend} exited {inv.returncode}: {tail}",
             ))
             return _finish(worktree=str(wt), resume_hint=hint)
+        # issue #74: the implement phase is where the brain runs its in-phase
+        # /code-review — record the reviewer only once the phase has actually
+        # completed (a launch failure or non-zero exit above never reviewed, so
+        # those paths leave review_prof None). Read off the resolved brain_call
+        # so the record tracks what actually ran.
+        if phase == "implement":
+            # Local import: profile imports run.brain_select at module load, so a
+            # top-level import here would close a circular-import loop.
+            from ..profile import resolve_review_profile
+            review_prof = resolve_review_profile(brain_call, cfg.brain_endpoint)
         decision = evaluate(inv.verdict)
         if not decision.proceed:
             # Resume marker is best-effort; a memory hiccup must not mask the halt.

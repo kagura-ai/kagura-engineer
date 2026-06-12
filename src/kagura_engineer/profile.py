@@ -152,12 +152,19 @@ def resolve_review_profile(
     )
 
 
+def review_provider_model(review: ReviewProfile) -> str:
+    """The `provider @ model` core format — the single source for every renderer
+    (the run one-liner and the goal table cell); None-handling stays at each
+    call site because the wording differs per surface ("none ran" vs "—")."""
+    return f"{review.provider} @ {review.model or 'default'}"
+
+
 def review_render_line(review: ReviewProfile | None) -> str:
     """The human one-liner for the review record. `None` is explicit — issue #74
     AC3: a run where no code review ran is distinguishable from one that did."""
     if review is None:
         return "review: none ran"
-    return f"review: {review.provider} @ {review.model or 'default'} (via {review.via})"
+    return f"review: {review_provider_model(review)} (via {review.via})"
 
 
 def review_to_dict_or_none(review: ReviewProfile | None) -> dict | None:

@@ -6,6 +6,7 @@ import json
 from rich.console import Console
 from rich.table import Table
 
+from ..profile import review_provider_model as _provider_model
 from ..profile import review_to_dict_or_none as _review_dict
 from ..profile import to_dict_or_none as _profile_dict
 from ..run.result import STATUS_ICON as _ICON
@@ -19,7 +20,7 @@ def _review_cell(r: RunReport) -> str:
     rev = r.review
     if rev is None:
         return "—"
-    return f"{rev.provider} @ {rev.model or 'default'}"
+    return _provider_model(rev)
 
 
 def to_json(report: GoalReport) -> str:
