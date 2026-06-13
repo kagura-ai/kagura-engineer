@@ -8,6 +8,24 @@ While the project is in `0.x`, minor versions may carry breaking changes.
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-06-13
+
+### Fixed
+
+- Native Windows: `doctor`/`setup` can now launch the npm `claude` `.cmd` shim
+  (a COMSPEC-routing launcher fixes the `WinError 2`), `--json` no longer crashes
+  under a cp932 console (UTF-8 stdout + subprocess decoding), and the
+  `kagura-brain` floor is raised to `>=0.4.1`. (#78)
+- The implement-phase commit no longer keeps a stray `@` as its subject line —
+  the orchestrator scrubs it, reading the message as UTF-8 so it also works on a
+  cp932 console. (#79, #88)
+- A green `ship` that opened no PR is now recovered: the orchestrator pushes the
+  branch and opens the PR itself rather than failing a complete, gate-green run. (#80)
+- `failover_memory` imports and runs on native Windows — the Unix-only `fcntl`
+  import is guarded and the WAL lock degrades to a no-op there. (#82)
+- The local-memory privacy test is skipped on native Windows, which uses ACLs
+  rather than POSIX mode bits. (#83)
+
 ## [0.4.0] — 2026-06-12
 
 ### Added
