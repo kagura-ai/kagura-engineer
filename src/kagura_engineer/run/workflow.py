@@ -337,16 +337,19 @@ def scrub_stray_commit_subject(worktree: Path) -> bool:
     it. Best-effort: returns ``True`` only when it actually amended, ``False``
     otherwise (clean subject, or any git failure) — a scrub problem must never
     fail an otherwise-green implement, so every error degrades to "leave it".
+
+    Uses ``run_text`` (issue #78 sweep) so the commit message is read as UTF-8
+    (git's storage encoding) rather than the console codec: on a cp932 console a
+    bare ``text=True`` would fail to decode a UTF-8 (e.g. Japanese) commit message
+    and silently skip the scrub. ``git`` is a real ``.exe`` so ``launch_argv`` is
+    a no-op here; the value is the encoding.
     """
     try:
-        proc = subprocess.run(
+        proc = run_text(
             ["git", "-C", str(worktree), "log", "-1", "--format=%B"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, timeout=10,
         )
     except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
-        # UnicodeDecodeError: text=True decodes with the console codec (cp932 on
-        # Windows); a commit message with bytes invalid there must degrade to
-        # "leave it", never crash the run — same guard as lookup_pr_url.
         return False
     if proc.returncode != 0:
         return False
@@ -358,10 +361,10 @@ def scrub_stray_commit_subject(worktree: Path) -> bool:
         # --allow-empty: we are rewriting only the message; the real implement
         # commit always has a tree change (#9 guard), but this keeps a pure
         # message scrub from ever failing on an otherwise-empty commit.
-        amend = subprocess.run(
+        amend = run_text(
             ["git", "-C", str(worktree), "commit", "--amend", "--allow-empty",
              "-m", cleaned],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, timeout=10,
         )
     except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
         return False

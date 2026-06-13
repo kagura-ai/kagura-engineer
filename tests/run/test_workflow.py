@@ -836,7 +836,8 @@ def _commit(tmp_path, message):
 def _head_body(tmp_path) -> str:
     out = subprocess.run(
         ["git", "log", "-1", "--format=%B"],
-        cwd=tmp_path, check=True, capture_output=True, text=True,
+        cwd=tmp_path, check=True, capture_output=True,
+        encoding="utf-8",  # git stores messages as UTF-8; cp932 default mangles 日本語
     )
     return out.stdout
 
@@ -865,14 +866,42 @@ def test_scrub_stray_commit_subject_best_effort_on_non_git(tmp_path):
 
 
 def test_scrub_stray_commit_subject_best_effort_on_undecodable_output(monkeypatch, tmp_path):
-    # Never-raise contract: `git log --format=%B` under text=True decodes with the
-    # console codec (cp932 on Windows); a message with bytes invalid there raises
-    # UnicodeDecodeError (a ValueError, NOT a SubprocessError) — it must degrade to
-    # False, not escape and fail an otherwise-green implement.
+    # Never-raise contract: even if a decode raises UnicodeDecodeError (a
+    # ValueError, NOT a SubprocessError) it must degrade to False, not escape and
+    # fail an otherwise-green implement. (run_text uses errors="replace" so this
+    # is belt-and-suspenders; the mock forces the raise to prove the guard holds.)
     def _boom(*a, **k):
         raise UnicodeDecodeError("cp932", b"\xff", 0, 1, "illegal multibyte sequence")
     monkeypatch.setattr(workflow.subprocess, "run", _boom)
     assert workflow.scrub_stray_commit_subject(tmp_path) is False
+
+
+def test_scrub_uses_run_text_and_preserves_non_ascii(monkeypatch, tmp_path):
+    # issue #78 sweep: the scrub must read/amend via run_text (UTF-8) like its
+    # siblings, so a non-ASCII (UTF-8) commit message is read correctly on a cp932
+    # console instead of being silently skipped. Pin the seam against a revert.
+    calls: list = []
+    def _fake(cmd, **kw):
+        calls.append(cmd)
+        if "log" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, "@\nfix: 日本語 subject\n", "")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+    monkeypatch.setattr(workflow, "run_text", _fake)
+    assert workflow.scrub_stray_commit_subject(tmp_path) is True
+    assert any("log" in c for c in calls)
+    amend = next(c for c in calls if "commit" in c)
+    assert "日本語 subject" in amend[amend.index("-m") + 1]  # non-ASCII preserved
+
+
+def test_scrub_amends_non_ascii_commit_message(tmp_path):
+    # End-to-end: a UTF-8 (Japanese) commit subject behind a stray `@` is scrubbed
+    # correctly — run_text reads git's UTF-8 output without mangling it.
+    _init_repo(tmp_path)
+    _commit(tmp_path, "@\nfix: 日本語の件名 (#79)\n\n本文")
+    assert workflow.scrub_stray_commit_subject(tmp_path) is True
+    body = _head_body(tmp_path)
+    assert body.startswith("fix: 日本語の件名 (#79)")
+    assert "本文" in body
 
 
 # --- persist child stdout on a (ship) FAIL for diagnosis (issue #38) ----------
