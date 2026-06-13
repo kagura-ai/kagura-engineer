@@ -1,4 +1,7 @@
 import stat
+import sys
+
+import pytest
 
 from kagura_engineer.run.local_memory import LocalMemoryClient
 from kagura_engineer.run.memory import MemoryClient
@@ -14,6 +17,13 @@ def test_satisfies_protocol(tmp_path):
     assert isinstance(_client(tmp_path), MemoryClient)
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="asserts POSIX 0o600/0o700 mode bits; Windows uses ACLs, not mode "
+           "bits, so os.chmod/os.open modes are no-ops there (issue #83). The "
+           "offline DB's owner-only posture holds on Windows via NTFS profile-ACL "
+           "inheritance under ~/.kagura.",
+)
 def test_db_file_and_dir_are_private(tmp_path, permissive_umask):
     # Issue #53: the offline DB holds memory payloads — it must never be
     # world-readable, regardless of umask.
