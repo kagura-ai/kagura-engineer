@@ -15,7 +15,6 @@ See docs/superpowers/specs/2026-06-08-failover-memory-design.md.
 """
 from __future__ import annotations
 
-import fcntl
 import json
 import logging
 import os
@@ -27,7 +26,44 @@ from typing import Any
 
 from .memory import MemoryClient
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows has no fcntl (issue #82)
+    fcntl = None
+
 _log = logging.getLogger(__name__)
+
+
+def _lock_exclusive(fileobj) -> None:
+    """Acquire an exclusive cross-process lock on an open file (POSIX `flock`).
+
+    On a platform without `fcntl` (Windows, issue #82) the WAL lock degrades to a
+    no-op: it is belt-and-suspenders — the run already discourages two
+    kagura-engineer runs in one repo (git-worktree contention) — and the WAL
+    writes it serialises are themselves best-effort, so losing cross-process
+    exclusion there is acceptable; crashing the import is not. The POSIX branch is
+    byte-for-byte the prior behaviour (verified by the Linux-CI lock tests)."""
+    if fcntl is not None:
+        fcntl.flock(fileobj.fileno(), fcntl.LOCK_EX)
+
+
+def _unlock(fileobj) -> None:
+    """Release the lock taken by `_lock_exclusive` (no-op without `fcntl`)."""
+    if fcntl is not None:
+        fcntl.flock(fileobj.fileno(), fcntl.LOCK_UN)
+
+
+def _fchmod_600(fileno: int) -> None:
+    """Tighten an open fd to owner-only where it has effect (#53/#82).
+
+    `os.fchmod` is documented Unix-only. On Windows CPython it is currently
+    present but a no-op (it does not touch NTFS ACLs); on a build where it is
+    absent the `hasattr` guard skips it — either way the WAL write must not crash.
+    The #53 owner-only posture therefore holds on Windows via NTFS ACL
+    inheritance from the user profile (`~/.kagura/...`), not via POSIX mode bits;
+    on POSIX `os.fchmod` applies the 0o600 mode exactly as before."""
+    if hasattr(os, "fchmod"):
+        os.fchmod(fileno, 0o600)
 
 
 def default_wal_path(context_id: str) -> Path:
@@ -102,11 +138,11 @@ class FailoverMemoryClient:
         that inode would silently stop excluding once the path is swapped."""
         self._lock_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self._lock_path, "w", encoding="utf-8") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            _lock_exclusive(f)
             try:
                 yield
             finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                _unlock(f)
 
     # --- WAL append (best-effort durable) ------------------------------------
     def _append(self, op: str, context_id: str, kwargs: dict[str, Any]) -> None:
@@ -134,7 +170,7 @@ class FailoverMemoryClient:
         # file left world-readable by a pre-fix version (#53).
         fd = os.open(self._wal_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         with open(fd, "a", encoding="utf-8") as f:
-            os.fchmod(f.fileno(), 0o600)
+            _fchmod_600(f.fileno())
             f.write(json.dumps(record) + "\n")
             f.flush()
             os.fsync(f.fileno())
@@ -205,7 +241,7 @@ class FailoverMemoryClient:
         # which O_TRUNC alone would reuse with its old mode.
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with open(fd, "w", encoding="utf-8") as f:
-            os.fchmod(f.fileno(), 0o600)
+            _fchmod_600(f.fileno())
             f.write("\n".join(json.dumps(r) for r in records) + "\n")
             f.flush()
             os.fsync(f.fileno())

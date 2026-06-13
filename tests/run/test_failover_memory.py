@@ -1,13 +1,32 @@
-import fcntl
 import json
+import os
 import stat
+import sys
 import threading
 import time
 from pathlib import Path
 
 import pytest
 
+from kagura_engineer.run import failover_memory as fm
 from kagura_engineer.run.failover_memory import FailoverMemoryClient, default_wal_path
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows has no fcntl (issue #82)
+    fcntl = None
+
+# issue #82: these guarantees are POSIX-specific. Perm tests assert mode bits
+# (Windows uses ACLs); lock tests need a real cross-process flock (the WAL lock
+# degrades to a no-op on Windows). Skip them there rather than fail spuriously.
+_posix_perms = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="asserts POSIX 0o600/0o700 mode bits; Windows uses ACLs (issue #82/#83)",
+)
+_posix_lock = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="needs real cross-process flock; the WAL lock is a no-op on Windows (#82)",
+)
 
 
 class _FakeInner:
@@ -174,6 +193,7 @@ def _mode(path) -> int:
     return stat.S_IMODE(Path(path).stat().st_mode)
 
 
+@_posix_perms
 def test_wal_file_and_dir_are_private(tmp_path, permissive_umask):
     # Issue #53: the WAL holds memory payloads (remember content, set_state
     # values) — it must never be world-readable, regardless of umask.
@@ -185,6 +205,7 @@ def test_wal_file_and_dir_are_private(tmp_path, permissive_umask):
     assert _mode(wal_path.parent) == 0o700
 
 
+@_posix_perms
 def test_preexisting_wal_artifacts_are_retightened(tmp_path, permissive_umask):
     # Upgrade path: a pre-fix version left the WAL dir/file world-readable.
     # mkdir/os.open modes only apply at creation, so the client must chmod /
@@ -200,6 +221,7 @@ def test_preexisting_wal_artifacts_are_retightened(tmp_path, permissive_umask):
     assert _mode(wal_dir) == 0o700
 
 
+@_posix_perms
 def test_wal_rewrite_after_partial_drain_stays_private(tmp_path, permissive_umask):
     # drain() rewrites the WAL via a temp file + os.replace; the rewritten
     # file (and the temp file while it exists) must keep owner-only perms.
@@ -220,6 +242,36 @@ def test_wal_rewrite_after_partial_drain_stays_private(tmp_path, permissive_umas
     assert c.drain() == 1
     assert len(_wal_records(wal_path)) == 1   # rewrite actually happened
     assert _mode(wal_path) == 0o600
+
+
+# --- issue #82: import + run on a platform without fcntl / os.fchmod (Windows) -
+
+
+def test_wal_lock_degrades_to_noop_without_fcntl(monkeypatch, tmp_path):
+    # On Windows fcntl is absent — the WAL lock must degrade to a no-op (the
+    # module already imports; _wal_lock must not raise) and writes still buffer.
+    monkeypatch.setattr(fm, "fcntl", None)
+    inner = _FakeInner(); inner.fail_writes = True
+    wal_path = tmp_path / "wal.jsonl"
+    c = FailoverMemoryClient(inner, wal_path)
+    with c._wal_lock():  # must not raise without fcntl
+        pass
+    c.remember("ctx", summary="s", content="c", type="savepoint")
+    assert len(_wal_records(wal_path)) == 1  # buffered despite the no-op lock
+
+
+def test_lock_helpers_are_noops_without_fcntl(monkeypatch, tmp_path):
+    monkeypatch.setattr(fm, "fcntl", None)
+    with open(tmp_path / "f", "w", encoding="utf-8") as f:
+        fm._lock_exclusive(f)  # must not raise
+        fm._unlock(f)
+
+
+def test_fchmod_600_noop_without_os_fchmod(monkeypatch):
+    # os.fchmod is documented Unix-only; on a build that lacks it, _fchmod_600
+    # must skip rather than raise AttributeError (issue #82).
+    monkeypatch.delattr(os, "fchmod", raising=False)
+    fm._fchmod_600(0)  # must not raise
 
 
 def test_drain_replays_in_order_and_empties_wal(tmp_path):
@@ -343,6 +395,7 @@ def _set_state_record(seq, key):
                        "kwargs": {"key": key, "value": {"v": seq}}})
 
 
+@_posix_lock
 def test_drain_holds_exclusive_lock_across_replay(tmp_path):
     """The sidecar <wal>.lock must be held (LOCK_EX) for the whole
     read→replay→write, so a probe from inside replay cannot acquire it."""
@@ -380,6 +433,7 @@ class _BlockingInner(_FakeInner):
         assert self._release.wait(timeout=5)
 
 
+@_posix_lock
 def test_concurrent_drains_do_not_duplicate_replay(tmp_path):
     """Two racing drains must replay each WAL record exactly once: the second
     drain waits for the lock, then sees the already-emptied WAL."""
@@ -403,6 +457,7 @@ def test_concurrent_drains_do_not_duplicate_replay(tmp_path):
     assert _wal_records(wal_path) == []
 
 
+@_posix_lock
 def test_append_during_drain_is_not_lost(tmp_path):
     """A buffered write racing a drain must survive: drain's WAL rewrite may
     not clobber a record appended by another client."""
