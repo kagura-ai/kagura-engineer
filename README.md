@@ -143,6 +143,57 @@ approval and sandbox policy remains the confinement boundary.
 The standalone reviewer uses its configured Ollama models. A brain subprocess
 is needed by `review` only when `--fix` is enabled.
 
+### Headless permissions (`run` / `doctor --exec-probe`)
+
+A headless `claude -p` has **no human to answer Claude Code's permission
+prompts** — a tool call that would normally pop an "allow?" dialog just hangs
+and gets reported as blocked, and the run red-halts. Every capability a run
+needs must therefore be granted *up front*, in two places:
+
+1. **The repo's `.claude/settings.json` allowlist** — commit one with the
+   commands and tools a run actually uses. `Edit`/`Write` are **separate
+   permissions from the Bash patterns**: with only a Bash allowlist, `start`
+   passes (it only runs commands) and `implement` red-halts (it has to write
+   code). A working baseline:
+
+   ```json
+   {
+     "permissions": {
+       "allow": [
+         "Edit", "Write", "NotebookEdit",
+         "Bash(git status *)", "Bash(git diff *)", "Bash(git log *)",
+         "Bash(git add *)", "Bash(git commit *)", "Bash(git checkout *)",
+         "Bash(git push *)", "Bash(git fetch *)",
+         "Bash(gh auth status)", "Bash(gh issue view *)",
+         "Bash(gh pr create *)", "Bash(gh pr view *)", "Bash(gh api *)",
+         "Bash(pytest *)", "Bash(uv run *)"
+       ]
+     }
+   }
+   ```
+
+2. **Workspace trust** — the allowlist is honoured only for directories the
+   *human* has trusted in Claude Code (`hasTrustDialogAccepted` in
+   `~/.claude.json`). Trust for the repo and trust for the `.kagura-runs/<repo>/`
+   worktree area are **separate** — and since each run gets a fresh
+   `run-<issue>` worktree path, trust must cover the worktree *parent*, not
+   one specific run dir. Open `claude` once in the repo **and** once under
+   `.kagura-runs/<repo>/` and accept the trust dialog. This step is
+   deliberately human-only: an agent must not be able to widen its own
+   permissions.
+
+`doctor --exec-probe` verifies both end-to-end, in the context `run` actually
+executes in: it creates an ephemeral git worktree under `.kagura-runs/<repo>/`
+(so the committed allowlist and the worktree-area trust are both exercised),
+launches the resolved headless brain there, asks it to run one
+approval-requiring command from the baseline (`gh auth status` — read-only git
+is approval-free and would prove nothing) and write one uniquely-named temp
+file, verifies the write **on disk** rather than trusting the model's
+self-report, then removes the worktree. It reports exactly which capability is
+blocked — before a real run burns a dispatch discovering it. With
+`brain_backend: codex` the probe is skipped (Codex uses its own
+sandbox/approval model, not Claude Code permissions).
+
 ---
 
 ## Commands
@@ -172,11 +223,13 @@ isolated, so one failure does not abort the remaining checks.
 | `memory-cloud` / `memory-local` | The selected memory backend is usable |
 | `memory-mcp` / `memory-context` | Cloud MCP config and live context binding are valid |
 | `gh-issue-driven` | The workflow plugin used by `run` is installed |
+| `headless-exec` (opt-in) | `doctor --exec-probe` verifies commands and file edits in an ephemeral run worktree; see [headless permissions](#headless-permissions-run--doctor---exec-probe) |
 
 ```bash
 kagura-engineer doctor
 kagura-engineer doctor --json
 kagura-engineer doctor -c path/to/repo.yaml
+kagura-engineer doctor --exec-probe   # + live headless-permissions probe (spends tokens, ~30 s+)
 ```
 
 Exit codes: `0` for OK/WARN only; `1` when any check fails. A missing or invalid
