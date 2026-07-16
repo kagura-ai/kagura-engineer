@@ -154,7 +154,8 @@ needs must therefore be granted *up front*, in two places:
    commands and tools a run actually uses. `Edit`/`Write` are **separate
    permissions from the Bash patterns**: with only a Bash allowlist, `start`
    passes (it only runs commands) and `implement` red-halts (it has to write
-   code). A working baseline:
+   code). A working baseline (or let `kagura-engineer setup --fix
+   headless-permissions` merge missing entries after an explicit prompt):
 
    ```json
    {
@@ -243,26 +244,29 @@ idempotent and safe to re-run.
 The canonical step order is:
 
 ```text
-git → claude-code → gh → ollama → ollama-models → memory-cloud → memory-mcp
+git → claude-code → headless-permissions → gh → ollama → ollama-models
+    → memory-cloud → memory-mcp
 ```
 
 ```bash
 kagura-engineer setup                  # full run
 kagura-engineer setup --dry-run        # preview without side effects
 kagura-engineer setup --fix gh         # run one step
+kagura-engineer setup --fix headless-permissions  # allowlist + trust guidance
 kagura-engineer setup --no-input       # never prompt
 kagura-engineer setup --full           # also install memory hooks and skills
 kagura-engineer setup --json
 ```
 
-Valid `--fix` targets are `git`, `claude-code`, `gh`, `ollama`,
-`ollama-models`, `memory-cloud`, and `memory-mcp`. Exit codes: `0` for
+Valid `--fix` targets are `git`, `claude-code`, `headless-permissions`, `gh`,
+`ollama`, `ollama-models`, `memory-cloud`, and `memory-mcp`. Exit codes: `0` for
 OK/SKIPPED; `1` when any step fails; `2` when user action is required or the
 config/target is invalid.
 
 When Codex is selected, install and authenticate its CLI separately; the
 current setup plan still provisions the Claude Code step used by the default
-backend.
+backend; `headless-permissions` itself is skipped because Codex has a separate
+sandbox/approval model.
 
 ### `kagura-engineer run`
 

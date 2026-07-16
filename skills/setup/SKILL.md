@@ -35,9 +35,16 @@ Usage: `kagura-engineer:setup` — no arguments. Add `--fix <step>` to repair on
    ```
 
    To repair a single step only, use `--fix <step>` where `<step>` is one of
-   `git`, `claude-code`, `gh`, `ollama`, `ollama-models`, `memory-cloud`,
-   `memory-mcp`. Add `--full` to the full run or the `memory-mcp` step to also
-   install memory hooks and skills; the default generates `.mcp.json` only.
+   `git`, `claude-code`, `headless-permissions`, `gh`, `ollama`,
+   `ollama-models`, `memory-cloud`, `memory-mcp`. Add `--full` to the full run
+   or the `memory-mcp` step to also install memory hooks and skills; the default
+   generates `.mcp.json` only.
+
+   The `headless-permissions` step asks before merging the documented baseline
+   into `.claude/settings.json`, preserves unrelated settings, and then asks the
+   human to confirm workspace trust for both the repo and its
+   `.kagura-runs/<repo>/` parent. It never edits `~/.claude.json`; with
+   `--no-input` it makes no change and reports `NEEDS_USER`.
 
    Exit-code contract: `0` = all steps ok/skipped · `1` = any step failed
    (**takes priority over 2**) · `2` = a step needs user input with no failure

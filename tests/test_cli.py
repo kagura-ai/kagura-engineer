@@ -144,6 +144,31 @@ def test_setup_json_emits_setup_report(write_cfg, monkeypatch):
     assert data["is_blocked"] is False
 
 
+def test_headless_permissions_no_input_json_is_machine_readable(
+    write_cfg, tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(
+        app,
+        [
+            "setup",
+            "--config",
+            str(write_cfg),
+            "--fix",
+            "headless-permissions",
+            "--no-input",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 2
+    import json
+
+    data = json.loads(result.stdout)
+    assert data["needs_user"][0]["name"] == "headless-permissions"
+    assert not (tmp_path / ".claude").exists()
+
+
 def test_setup_dry_run_propagates(write_cfg, monkeypatch):
     captured = {}
 
