@@ -8,6 +8,40 @@ While the project is in `0.x`, minor versions may carry breaking changes.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-07-16
+
+### Added
+
+- `doctor --exec-probe` now verifies that the selected headless brain can run an
+  approval-requiring command and edit a file inside an ephemeral run worktree,
+  exposing Claude Code permission or workspace-trust blockers before a real run
+  spends a dispatch. (#93, #94)
+- `setup` can scaffold and safely merge the baseline Claude Code headless
+  allowlist for command and file-edit capabilities, while keeping workspace
+  trust as an explicit human-only step. (#97, #98)
+- Cloud-backed runs now use one fail-soft `get_agent_bootstrap` call for context
+  instructions, pinned and trusted recalled memories, upcoming time memories,
+  resume state, and agent/session audit correlation. Local and failover backends
+  implement the same protocol; the eval control arm requests state only. (#96,
+  #99)
+- Cloud doctor checks now gate on Memory Cloud v0.49.0+ and verify that the
+  configured Agent Registry identity is bound to the run context. (#96, #99)
+
+### Changed
+
+- Raised the `kagura-memory` dependency to `>=0.37,<0.38`, added the per-checkout
+  `agent_id` configuration field, and documented the one-time registration and
+  context-binding migration. (#96, #99)
+- Refreshed the public README and document map, removing stale internal topology
+  and keeping only publicly accessible related repositories. (#95)
+
+### Security
+
+- Bootstrap responses fail closed on agent/context/session mismatches, malformed
+  state, non-trusted recall payloads, and degraded pinned/state/policy lanes;
+  recall and upcoming-memory failures may proceed explicitly degraded. (#96,
+  #99)
+
 ## [0.5.0] — 2026-06-16
 
 ### Removed
@@ -256,7 +290,8 @@ First public release. `kagura-engineer` is a `0.x` autonomous coding harness ove
   just `profile` + `memory_backend: local`. They stay required for the (default)
   cloud backend.
 
-[Unreleased]: https://github.com/kagura-ai/kagura-engineer/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/kagura-ai/kagura-engineer/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/kagura-ai/kagura-engineer/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/kagura-ai/kagura-engineer/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/kagura-ai/kagura-engineer/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/kagura-ai/kagura-engineer/compare/v0.3.3...v0.4.0
