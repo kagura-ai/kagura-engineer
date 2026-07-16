@@ -412,6 +412,97 @@ def test_memory_cloud_http_error_without_credential_guides_auth(monkeypatch, tmp
     assert "KAGURA_API_KEY" in r.fix_hint
 
 
+# --- agent bootstrap prerequisites (issue #96) -----------------------------
+
+
+def test_memory_cloud_version_accepts_v049_and_newer():
+    seen = []
+    result = checks.check_memory_cloud_version(
+        "https://memory.example",
+        fetch=lambda url: seen.append(url) or {"version": "v0.49.0"},
+    )
+    assert result.status is Status.OK
+    assert seen == ["https://memory.example/api/v1/system/info"]
+
+
+def test_memory_cloud_version_rejects_old_or_malformed_server():
+    old = checks.check_memory_cloud_version(
+        "https://memory.example", fetch=lambda _: {"version": "0.48.9"}
+    )
+    malformed = checks.check_memory_cloud_version(
+        "https://memory.example", fetch=lambda _: {"version": "latest"}
+    )
+    assert old.status is Status.FAIL
+    assert "0.49.0" in (old.fix_hint or "")
+    assert malformed.status is Status.FAIL
+
+
+def test_memory_cloud_version_failure_does_not_echo_url_credentials():
+    def _boom(url):
+        raise RuntimeError(f"failed to open {url}")
+
+    result = checks.check_memory_cloud_version(
+        "https://user:secret@memory.example", fetch=_boom
+    )
+    rendered = f"{result.detail} {result.fix_hint}"
+    assert result.status is Status.FAIL
+    assert "secret" not in rendered
+    assert "memory.example" in rendered
+
+
+def test_memory_agent_requires_registered_identity(valid_config):
+    result = checks.check_memory_agent(
+        valid_config.model_copy(update={"agent_id": ""}),
+        fetch=lambda _: pytest.fail("missing identity must not call bootstrap"),
+    )
+    assert result.status is Status.FAIL
+    assert "register_agent" in (result.fix_hint or "")
+
+
+def test_memory_agent_accepts_bound_state_bootstrap(valid_config):
+    from kagura_engineer.run.memory import MemoryBootstrap
+
+    result = checks.check_memory_agent(
+        valid_config,
+        fetch=lambda cfg: MemoryBootstrap(
+            agent_id=cfg.agent_id,
+            context_id=cfg.context_id,
+            session_id="kagura-engineer-doctor",
+            component_statuses=(("state", "ok"),),
+        ),
+    )
+    assert result.status is Status.OK
+    assert valid_config.context_id in result.detail
+
+
+def test_memory_agent_fails_closed_on_degraded_state(valid_config):
+    from kagura_engineer.run.memory import MemoryBootstrap
+
+    result = checks.check_memory_agent(
+        valid_config,
+        fetch=lambda cfg: MemoryBootstrap(
+            agent_id=cfg.agent_id,
+            context_id=cfg.context_id,
+            degraded=True,
+            component_statuses=(("state", "error"),),
+        ),
+    )
+    assert result.status is Status.FAIL
+    assert "state" in result.detail
+
+
+def test_memory_agent_failure_does_not_echo_transport_secrets(valid_config):
+    def _boom(cfg):
+        raise RuntimeError(f"failed at {cfg.memory_cloud_url}")
+
+    cfg = valid_config.model_copy(update={
+        "memory_cloud_url": "https://user:secret@memory.example",
+    })
+    result = checks.check_memory_agent(cfg, fetch=_boom)
+    assert result.status is Status.FAIL
+    assert "secret" not in f"{result.detail} {result.fix_hint}"
+
+
 def test_check_codex_fails_when_absent(monkeypatch):
     monkeypatch.setattr(checks.shutil, "which", lambda name: None)
     res = checks.check_codex()

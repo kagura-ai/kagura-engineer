@@ -21,6 +21,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .memory import BootstrapComponent, MemoryBootstrap, compose_bootstrap
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories (
     id         TEXT PRIMARY KEY,
@@ -66,6 +68,28 @@ class LocalMemoryClient:
             (context_id,),
         ).fetchall()
         return [r[0] for r in rows]
+
+    def bootstrap(
+        self,
+        context_id: str,
+        *,
+        agent_id: str | None,
+        session_id: str,
+        query: str | None,
+        k: int = 5,
+        include: list[BootstrapComponent] | None = None,
+        state_key: str | None = None,
+    ) -> MemoryBootstrap:
+        return compose_bootstrap(
+            self,
+            context_id,
+            agent_id=agent_id,
+            session_id=session_id,
+            query=query,
+            k=k,
+            include=include,
+            state_key=state_key,
+        )
 
     def recall(
         self, context_id: str, query: str, *, k: int = 5,

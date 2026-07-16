@@ -1,5 +1,22 @@
+import pytest
+
 from kagura_engineer.doctor import registry
 from kagura_engineer.doctor.result import CheckResult, Status
+
+
+@pytest.fixture(autouse=True)
+def _stub_agent_bootstrap_checks(monkeypatch):
+    """Keep registry tests offline unless a case overrides these checks."""
+    monkeypatch.setattr(
+        registry.checks,
+        "check_memory_cloud_version",
+        lambda *a, **k: CheckResult("memory-cloud-version", Status.OK, "ok"),
+    )
+    monkeypatch.setattr(
+        registry.checks,
+        "check_memory_agent",
+        lambda *a, **k: CheckResult("memory-agent", Status.OK, "ok"),
+    )
 
 
 def test_run_all_invokes_every_check(monkeypatch, valid_config):
@@ -18,6 +35,12 @@ def test_run_all_invokes_every_check(monkeypatch, valid_config):
     monkeypatch.setattr(registry.checks, "check_ollama", _stub("ollama"))
     monkeypatch.setattr(registry.checks, "check_haiku", _stub("haiku"))
     monkeypatch.setattr(registry.checks, "check_memory_cloud", _stub("memory-cloud"))
+    monkeypatch.setattr(
+        registry.checks,
+        "check_memory_cloud_version",
+        _stub("memory-cloud-version"),
+    )
+    monkeypatch.setattr(registry.checks, "check_memory_agent", _stub("memory-agent"))
     monkeypatch.setattr(registry.checks, "check_memory_mcp", _stub("memory-mcp"))
     monkeypatch.setattr(registry.checks, "check_memory_context", _stub("memory-context"))
     monkeypatch.setattr(registry.checks, "check_gh_issue_driven", _stub("gh-issue-driven"))
@@ -30,11 +53,13 @@ def test_run_all_invokes_every_check(monkeypatch, valid_config):
         "ollama",
         "haiku",
         "memory-cloud",
+        "memory-cloud-version",
+        "memory-agent",
         "memory-mcp",
         "memory-context",
         "gh-issue-driven",
     }
-    assert len(calls) == 9
+    assert len(calls) == 11
 
 
 def test_overall_status_is_worst():
@@ -115,6 +140,8 @@ def test_run_all_isolates_check_exceptions(monkeypatch, valid_config):
         "ollama",
         "haiku",
         "memory-cloud",
+        "memory-cloud-version",
+        "memory-agent",
         "memory-mcp",
         "memory-context",
         "gh-issue-driven",
@@ -160,7 +187,14 @@ def test_run_all_without_config_runs_only_config_free_checks(monkeypatch):
     ]:
         monkeypatch.setattr(registry.checks, fn_name, _stub(label))
     # These must NOT be invoked when there is no config.
-    for fn_name in ("check_ollama", "check_memory_cloud", "check_local_memory", "check_memory_mcp"):
+    for fn_name in (
+        "check_ollama",
+        "check_memory_cloud",
+        "check_memory_cloud_version",
+        "check_memory_agent",
+        "check_local_memory",
+        "check_memory_mcp",
+    ):
         monkeypatch.setattr(registry.checks, fn_name, _stub("SHOULD-NOT-RUN"))
 
     results = registry.run_all(None)
@@ -206,6 +240,8 @@ def test_run_all_uses_local_memory_check_when_backend_local(monkeypatch, valid_c
     # The MCP-config check is cloud-only: the offline SQLite backend has no
     # MCP memory server, so no memory-mcp row appears for a local repo.
     assert not any(r.name == "memory-mcp" for r in results)
+    assert not any(r.name == "memory-cloud-version" for r in results)
+    assert not any(r.name == "memory-agent" for r in results)
     # Same for the context-resolution check (issue #70): a local backend has
     # no cloud context to resolve, so the check is skipped entirely.
     assert not any(r.name == "memory-context" for r in results)

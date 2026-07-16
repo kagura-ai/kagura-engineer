@@ -2,10 +2,12 @@ from pathlib import Path
 
 from kagura_engineer.doctor.result import CheckResult, Status
 from kagura_engineer.run import run_idea, STATUS_EXIT
+from kagura_engineer.run.memory import MemoryBootstrap, compose_bootstrap
 from kagura_engineer.run.result import RunStatus
 from kagura_engineer.run.workflow import PhaseInvocation
 from tests._constants import (
-    VALID_CONTEXT_UUID, VALID_MEMORY_URL, VALID_PROFILE, VALID_WORKSPACE,
+    VALID_AGENT_UUID, VALID_CONTEXT_UUID, VALID_MEMORY_URL, VALID_PROFILE,
+    VALID_WORKSPACE,
 )
 from kagura_engineer.config import Config
 
@@ -14,6 +16,7 @@ def _cfg() -> Config:
     return Config(
         profile=VALID_PROFILE, memory_cloud_url=VALID_MEMORY_URL,
         workspace_id=VALID_WORKSPACE, context_id=VALID_CONTEXT_UUID,
+        agent_id=VALID_AGENT_UUID,
     )
 
 
@@ -23,6 +26,31 @@ class _FakeMemory:
         self.remembered = []
         self.feedback_calls = []
         self.explore_result = []
+        self.bootstrap_calls = []
+
+    def bootstrap(
+        self, context_id, *, agent_id, session_id, query, k=5,
+        include=None, state_key=None,
+    ):
+        self.bootstrap_calls.append({
+            "context_id": context_id,
+            "agent_id": agent_id,
+            "session_id": session_id,
+            "query": query,
+            "k": k,
+            "include": include,
+            "state_key": state_key,
+        })
+        return compose_bootstrap(
+            self,
+            context_id,
+            agent_id=agent_id,
+            session_id=session_id,
+            query=query,
+            k=k,
+            include=include,
+            state_key=state_key,
+        )
 
     def load_pinned(self, context_id): return ["guardrail: TDD"]
     def recall(self, context_id, query, *, k=5): return ["decision A"]
@@ -195,16 +223,90 @@ def test_worktree_error_is_fail(monkeypatch):
     assert report.phases[-1].name == "worktree"
 
 
-def test_recall_error_is_fail(monkeypatch):
-    _patch_boundaries(monkeypatch, phases={})
+def test_recall_component_error_degrades_and_proceeds(monkeypatch):
+    _patch_boundaries(monkeypatch, phases={
+        "start": PhaseInvocation("start", 0, "", "", "green", None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
 
     class _BrokenMemory(_FakeMemory):
         def recall_detailed(self, context_id, query, *, k=5):
             raise RuntimeError("kagura connection refused")
 
     report = run_idea(_cfg(), 42, memory=_BrokenMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK
+    recall = next(p for p in report.phases if p.name == "recall")
+    assert "degraded: recall" in recall.detail
+
+
+def test_pinned_component_error_fails_closed(monkeypatch):
+    _patch_boundaries(monkeypatch, phases={})
+
+    class _BrokenMemory(_FakeMemory):
+        def load_pinned(self, context_id):
+            raise RuntimeError("pinned policy unavailable")
+
+    report = run_idea(_cfg(), 42, memory=_BrokenMemory(), repo_root=Path("/repo"))
     assert report.status is RunStatus.FAIL
     assert report.phases[-1].name == "recall"
+    assert "pinned" in report.phases[-1].detail
+
+
+def test_bootstrap_injects_instructions_upcoming_and_audits_identity(monkeypatch):
+    _patch_boundaries(monkeypatch, phases={})
+    captured = {"grounding": None}
+
+    def _invoke(phase, issue, worktree, grounding, **kwargs):
+        captured["grounding"] = list(grounding)
+        pr_url = "https://x/pull/9" if phase == "ship" else None
+        return PhaseInvocation(phase, 0, "", "", "green", pr_url)
+
+    monkeypatch.setattr("kagura_engineer.run.invoke_phase", _invoke)
+
+    class _BootstrapMemory(_FakeMemory):
+        def bootstrap(
+            self, context_id, *, agent_id, session_id, query, k=5,
+            include=None, state_key=None,
+        ):
+            self.bootstrap_calls.append(session_id)
+            return MemoryBootstrap(
+                agent_id=agent_id,
+                context_id=context_id,
+                session_id=session_id,
+                instructions="Never skip the regression test.",
+                pinned=("guardrail",),
+                recalled=(("m9", "decision"),),
+                upcoming=("release window tomorrow",),
+                state={},
+                component_statuses=(
+                    ("pinned", "ok"),
+                    ("recall", "ok"),
+                    ("upcoming", "ok"),
+                    ("state", "ok"),
+                    ("policy", "ok"),
+                ),
+            )
+
+    progress = []
+    memory = _BootstrapMemory()
+    report = run_idea(
+        _cfg(), 42, memory=memory, repo_root=Path("/repo"), progress=progress.append
+    )
+
+    assert report.status is RunStatus.OK
+    assert len(memory.bootstrap_calls) == 1
+    assert captured["grounding"] == [
+        "Memory context instructions:\nNever skip the regression test.",
+        "guardrail",
+        "decision",
+        "release window tomorrow",
+    ]
+    assert any(
+        line.startswith(f"memory bootstrap: agent={VALID_AGENT_UUID} ")
+        and "session=kagura-engineer-42-" in line
+        for line in progress
+    )
+    assert memory.feedback_calls == ["m9"]
 
 
 def test_persist_failure_is_non_fatal(monkeypatch):
@@ -437,6 +539,9 @@ def test_control_arm_injects_no_grounding(monkeypatch):
     assert mem.load_pinned_calls == 0          # no pinned pulled
     assert mem.recall_calls == 0               # no recall
     assert mem.explore_calls == 0              # no graph enrichment
+    assert len(mem.bootstrap_calls) == 1
+    assert mem.bootstrap_calls[0]["include"] == ["state"]
+    assert mem.bootstrap_calls[0]["query"] is None
 
 
 def test_control_arm_skips_reinforcement(monkeypatch):
@@ -974,7 +1079,8 @@ def test_grounding_evidence_line_streams_real_counts(monkeypatch):
              progress=lines.append)
     # _FakeMemory grounds with 1 pinned + 1 recalled memory.
     assert (
-        f"grounding: pinned 1 + recalled 1 from context {VALID_CONTEXT_UUID}"
+        f"grounding: pinned 1 + recalled 1 + upcoming 0 + instructions no "
+        f"from context {VALID_CONTEXT_UUID}"
         in lines
     ), lines
 

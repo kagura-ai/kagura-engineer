@@ -52,6 +52,16 @@ _CHECKS: list[tuple[str, callable, bool]] = [
 # .mcp.json check (issue #36) is meaningless for it. Config-dependent by
 # definition (the backend is a config field), so omitted from run_all(None).
 _CLOUD_ONLY_CHECKS: list[tuple[str, callable, bool]] = [
+    # #96: agent bootstrap was introduced in memory-cloud v0.49.0. Reachability
+    # alone cannot prove the configured server exposes that control-plane lane.
+    (
+        "memory-cloud-version",
+        lambda c: checks.check_memory_cloud_version(c.memory_cloud_url),
+        True,
+    ),
+    # Verify the one-time Agent Registry identity + context binding with a
+    # state-only bootstrap (no memory recall).
+    ("memory-agent", lambda c: checks.check_memory_agent(c), True),
     ("memory-mcp", lambda c: checks.check_memory_mcp(Path.cwd()), True),
     # issue #70: live-resolve config.context_id to its context NAME so a
     # wildcard/stale binding pointing recall at the wrong context is caught

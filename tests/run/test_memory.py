@@ -1,4 +1,37 @@
-from kagura_engineer.run.memory import KaguraCloudClient, MemoryClient
+import pytest
+
+from kagura_engineer.run.memory import (
+    BootstrapContractError,
+    KaguraCloudClient,
+    MemoryClient,
+)
+
+
+def _bootstrap_response(*, components=None, degraded=False):
+    return {
+        "status": "success",
+        "degraded": degraded,
+        "agent": {
+            "agent_id": "agent-1",
+            "name": "kagura-engineer",
+            "binding": {"context_id": "ctx"},
+        },
+        "context": {"id": "ctx", "name": "coding"},
+        "instructions": "Prefer tests before implementation.",
+        "components": components or {
+            "pinned": {"status": "ok", "memories": [{"summary": "guardrail"}]},
+            "recall": {
+                "status": "ok",
+                "trust_filter": "trusted",
+                "results": [{"memory_id": "m1", "summary": "past decision"}],
+            },
+            "upcoming": {"status": "ok", "results": [{"summary": "deadline"}]},
+            "state": {"status": "ok", "states": {"run:42": {"phase": "start"}}},
+            "policy": {"status": "ok"},
+        },
+        "correlation": {"session_id": "session-1"},
+        "generated_at": "2026-07-16T00:00:00Z",
+    }
 
 
 class _FakeSDK:
@@ -70,6 +103,105 @@ def test_set_state_passes_value():
 def test_kagura_cloud_client_satisfies_protocol():
     client: MemoryClient = KaguraCloudClient(_FakeSDK())
     assert isinstance(client, MemoryClient)  # runtime_checkable
+
+
+def test_cloud_bootstrap_is_one_sdk_call_and_keeps_ids_and_context_guide():
+    class _Sdk:
+        def __init__(self):
+            self.calls = []
+
+        async def get_agent_bootstrap(self, agent_id, **kwargs):
+            self.calls.append((agent_id, kwargs))
+            return _bootstrap_response()
+
+    sdk = _Sdk()
+    bootstrap = KaguraCloudClient(sdk).bootstrap(
+        "ctx",
+        agent_id="agent-1",
+        session_id="session-1",
+        query="issue 42",
+        k=7,
+    )
+
+    assert len(sdk.calls) == 1
+    assert sdk.calls[0] == (
+        "agent-1",
+        {
+            "context_id": "ctx",
+            "session_id": "session-1",
+            "query": "issue 42",
+            "recall_k": 7,
+            "include": None,
+        },
+    )
+    assert bootstrap.pinned == ("guardrail",)
+    assert bootstrap.recalled == (("m1", "past decision"),)
+    assert bootstrap.upcoming == ("deadline",)
+    assert bootstrap.instructions == "Prefer tests before implementation."
+    assert bootstrap.state["run:42"] == {"phase": "start"}
+
+
+def test_cloud_bootstrap_state_only_forwards_include_without_recall():
+    class _Sdk:
+        async def get_agent_bootstrap(self, agent_id, **kwargs):
+            assert kwargs["include"] == ["state"]
+            assert kwargs["query"] is None
+            return _bootstrap_response(components={
+                "state": {"status": "ok", "states": {"run:42": {"done": True}}},
+            })
+
+    result = KaguraCloudClient(_Sdk()).bootstrap(
+        "ctx",
+        agent_id="agent-1",
+        session_id="session-1",
+        query=None,
+        include=["state"],
+    )
+    assert result.state == {"run:42": {"done": True}}
+    assert result.recalled == ()
+    assert result.component_statuses == (("state", "ok"),)
+
+
+def test_cloud_bootstrap_accepts_real_sdk_response_model():
+    from kagura_memory.models import AgentBootstrapResponse
+
+    response = AgentBootstrapResponse.model_validate(_bootstrap_response())
+
+    class _Sdk:
+        async def get_agent_bootstrap(self, *args, **kwargs):
+            return response
+
+    result = KaguraCloudClient(_Sdk()).bootstrap(
+        "ctx", agent_id="agent-1", session_id="session-1", query="q"
+    )
+    assert result.recalled == (("m1", "past decision"),)
+    assert result.instructions == "Prefer tests before implementation."
+
+
+def test_cloud_bootstrap_rejects_untrusted_or_identity_mismatched_payload():
+    untrusted = _bootstrap_response()
+    untrusted["components"]["recall"]["trust_filter"] = "all"
+
+    class _UntrustedSdk:
+        async def get_agent_bootstrap(self, *args, **kwargs):
+            return untrusted
+
+    with pytest.raises(BootstrapContractError, match="trusted"):
+        KaguraCloudClient(_UntrustedSdk()).bootstrap(
+            "ctx", agent_id="agent-1", session_id="session-1", query="q"
+        )
+
+    mismatched = _bootstrap_response()
+    mismatched["context"]["id"] = "other-context"
+
+    class _MismatchedSdk:
+        async def get_agent_bootstrap(self, *args, **kwargs):
+            return mismatched
+
+    with pytest.raises(BootstrapContractError, match="configured context"):
+        KaguraCloudClient(_MismatchedSdk()).bootstrap(
+            "ctx", agent_id="agent-1", session_id="session-1", query="q"
+        )
 
 
 def test_get_state_returns_none_when_missing():
@@ -192,7 +324,7 @@ def test_cloud_recall_detailed_returns_pairs_and_recall_wraps():
 
 
 def test_cloud_feedback_maps_weight_to_helpful():
-    # The real kagura-memory 0.29 SDK is helpful-based, NOT weight-based:
+    # The real kagura-memory 0.37 SDK is helpful-based, NOT weight-based:
     #   feedback(context_id, memory_id, helpful, *, query=None, note=None)
     # The cloud adapter must map the Protocol's positive `weight` onto
     # `helpful=True` and pass NO `weight` kwarg (issue #16). This fake mirrors

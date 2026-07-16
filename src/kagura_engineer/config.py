@@ -60,6 +60,11 @@ class Config(BaseModel):
     # API key (resolved at the client layer) is also workspace-scoped.
     workspace_id: str = ""
     context_id: str = ""
+    # Memory Cloud Agent Registry identity used by the one-call session
+    # bootstrap. Kept optional at config-load time for backwards-compatible
+    # migration; the cloud-only doctor check fails closed until it is populated
+    # and bound to context_id. Local memory does not need an agent identity.
+    agent_id: str = ""
     ollama_url: str = "http://localhost:11434"
     review: ReviewConfig = Field(default_factory=ReviewConfig)
     # Memory backend: "cloud" (Kagura Memory Cloud SDK) or "local" (offline

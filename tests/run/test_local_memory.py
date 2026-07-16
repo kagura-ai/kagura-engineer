@@ -84,6 +84,32 @@ def test_state_roundtrip_and_missing(tmp_path):
     assert c.get_state(CTX, "run:1") == {"done": True, "pr": "u"}
 
 
+def test_bootstrap_composes_local_pinned_recall_and_state(tmp_path):
+    c = _client(tmp_path)
+    pinned_id = c.remember(
+        CTX, summary="always test first", content="", type="guardrail"
+    )
+    c.pin(CTX, pinned_id)
+    recalled_id = c.remember(
+        CTX, summary="worktree decision", content="", type="decision"
+    )
+    c.set_state(CTX, "run:42", {"phase": "start"})
+
+    bootstrap = c.bootstrap(
+        CTX,
+        agent_id="local-agent",
+        session_id="session-1",
+        query="worktree",
+        state_key="run:42",
+    )
+
+    assert bootstrap.pinned == ("always test first",)
+    assert bootstrap.recalled == ((recalled_id, "worktree decision"),)
+    assert bootstrap.state == {"run:42": {"phase": "start"}}
+    assert bootstrap.agent_id == "local-agent"
+    assert bootstrap.degraded is False
+
+
 def test_set_state_upserts(tmp_path):
     c = _client(tmp_path)
     c.set_state(CTX, "k", {"v": 1})

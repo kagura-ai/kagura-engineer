@@ -24,7 +24,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from .memory import MemoryClient
+from .memory import BootstrapComponent, MemoryBootstrap, MemoryClient
 
 try:
     import fcntl
@@ -80,6 +80,27 @@ class FailoverMemoryClient:
         self._lock_path = self._wal_path.with_name(self._wal_path.name + ".lock")
 
     # --- reads: delegate, let failures propagate (Cloud-primary) -------------
+    def bootstrap(
+        self,
+        context_id: str,
+        *,
+        agent_id: str | None,
+        session_id: str,
+        query: str | None,
+        k: int = 5,
+        include: list[BootstrapComponent] | None = None,
+        state_key: str | None = None,
+    ) -> MemoryBootstrap:
+        return self._inner.bootstrap(
+            context_id,
+            agent_id=agent_id,
+            session_id=session_id,
+            query=query,
+            k=k,
+            include=include,
+            state_key=state_key,
+        )
+
     def load_pinned(self, context_id: str) -> list[str]:
         return self._inner.load_pinned(context_id)
 

@@ -45,6 +45,9 @@ memory_backend: cloud
 memory_cloud_url: ""
 workspace_id: ""
 context_id: ""
+# Register this harness once in the Memory Cloud Agent Registry, bind it to the
+# context above, then paste the returned agent UUID here. See README.
+agent_id: ""
 
 # --- Local backend (used only when memory_backend: local) ---
 # local_memory_path: .kagura/memory.db

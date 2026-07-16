@@ -9,6 +9,7 @@ from kagura_engineer.config import CLOUD_REQUIRED_FIELDS, Config, load_config
 from kagura_engineer.config import ConfigError
 
 from tests._constants import (
+    VALID_AGENT_UUID,
     VALID_CONTEXT_UUID,
     VALID_MEMORY_URL,
     VALID_PROFILE,
@@ -22,6 +23,7 @@ def test_load_minimal_yaml(write_cfg):
     assert cfg.memory_cloud_url == VALID_MEMORY_URL
     assert cfg.workspace_id == VALID_WORKSPACE
     assert cfg.context_id == VALID_CONTEXT_UUID
+    assert cfg.agent_id == VALID_AGENT_UUID
     assert cfg.review.models == []
     assert cfg.review.max_loops == 3
     assert cfg.ollama_url == "http://localhost:11434"

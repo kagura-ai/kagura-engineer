@@ -12,6 +12,7 @@ import pytest
 
 from kagura_engineer.config import Config
 from tests._constants import (
+    VALID_AGENT_UUID,
     VALID_CONTEXT_UUID,
     VALID_MEMORY_URL,
     VALID_PROFILE,
@@ -27,6 +28,7 @@ def valid_repo_yaml_text() -> str:
         f"memory_cloud_url: {VALID_MEMORY_URL}\n"
         f"workspace_id: {VALID_WORKSPACE}\n"
         f"context_id: {VALID_CONTEXT_UUID}\n"
+        f"agent_id: {VALID_AGENT_UUID}\n"
     )
 
 
@@ -46,6 +48,7 @@ def valid_config() -> Config:
         memory_cloud_url=VALID_MEMORY_URL,
         workspace_id=VALID_WORKSPACE,
         context_id=VALID_CONTEXT_UUID,
+        agent_id=VALID_AGENT_UUID,
     )
 
 
