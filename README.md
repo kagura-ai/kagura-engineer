@@ -91,6 +91,7 @@ memory_backend: cloud                             # cloud | local (default: clou
 memory_cloud_url: https://memory.kagura-ai.com
 workspace_id: ws_xxxxxxxx
 context_id: 00000000-0000-0000-0000-000000000000
+agent_id: 00000000-0000-0000-0000-000000000000   # registered once; see below
 memory_failover: true                             # buffer failed critical writes locally
 # memory_mcp_config: path/to/.mcp.json            # optional; <repo>/.mcp.json is auto-discovered
 
@@ -111,7 +112,9 @@ lenient so they can diagnose or bootstrap a fresh checkout.
 ### Memory
 
 For `memory_backend: cloud`, `memory_cloud_url`, `workspace_id`, and
-`context_id` are required. Authentication is resolved in this order:
+`context_id` are required. `run` also requires a registered `agent_id`; doctor
+reports a blocking `memory-agent` failure while an older config is being
+migrated. Authentication is resolved in this order:
 
 1. `KAGURA_API_KEY`, suitable for CI and other non-interactive environments.
 2. The OAuth profile written by `kagura auth login`.
@@ -119,6 +122,45 @@ For `memory_backend: cloud`, `memory_cloud_url`, `workspace_id`, and
 For `memory_backend: local`, the Cloud fields and credentials may be omitted.
 The local backend uses SQLite and keyword-overlap recall; it does not provide
 the Cloud service's full graph and consolidation behavior.
+
+#### Agent bootstrap identity
+
+Cloud-backed runs start with one fail-soft `get_agent_bootstrap` call. It
+returns the context guide, pinned and recalled memories, upcoming time
+memories, and resumable state with agent/session audit correlation. This path
+requires Memory Cloud v0.49.0 or newer and a one-time Agent Registry entry.
+
+Register the harness and bind it to this repository's context once with an
+owner/admin credential. The run reads and writes that context, so the binding
+must allow both:
+
+```python
+import asyncio
+from kagura_memory import KaguraClient
+
+CONTEXT_ID = "00000000-0000-0000-0000-000000000000"
+
+async def main():
+    async with KaguraClient() as client:
+        agent = await client.register_agent(
+            "kagura-engineer",
+            description="Issue-to-PR engineering harness",
+        )
+        await client.bind_agent_context(
+            agent.agent_id,
+            CONTEXT_ID,
+            can_read=True,
+            write_policy="direct",
+            is_default=True,
+        )
+        print(agent.agent_id)
+
+asyncio.run(main())
+```
+
+Copy the printed UUID to `repo.yaml` as `agent_id`, then run
+`kagura-engineer doctor`. Registration is intentionally not automatic: it is a
+privileged, workspace-scoped operation and the agent name must be unique.
 
 With Cloud failover enabled, critical writes that fail during an outage are
 buffered in a local write-ahead log and replayed on a later run. Cloud remains
@@ -222,7 +264,8 @@ isolated, so one failure does not abort the remaining checks.
 | `ollama` | The daemon is reachable and configured reviewer models are present |
 | `haiku` | An Anthropic auth source resolves for the Haiku-dependent lane |
 | `memory-cloud` / `memory-local` | The selected memory backend is usable |
-| `memory-mcp` / `memory-context` | Cloud MCP config and live context binding are valid |
+| `memory-cloud-version` / `memory-agent` | Cloud supports bootstrap and the configured agent/context binding resolves |
+| `memory-mcp` / `memory-context` | Cloud MCP config and live context are valid |
 | `gh-issue-driven` | The workflow plugin used by `run` is installed |
 | `headless-exec` (opt-in) | `doctor --exec-probe` verifies commands and file edits in an ephemeral run worktree; see [headless permissions](#headless-permissions-run--doctor---exec-probe) |
 

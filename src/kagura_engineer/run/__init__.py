@@ -3,7 +3,7 @@
 `run_idea` walks a fixed phase sequence and returns a `RunReport`:
 
     guard     → doctor blocking-check verification (no auto-setup)
-    recall    → load_pinned + recall + get_state (grounding / resume)
+    recall    → one agent bootstrap + best-effort explore (grounding / resume)
     worktree  → ensure run-<issue#> worktree (resumable)
     start     → claude -p /gh-issue-driven:start → gate (design)
     implement → claude -p TDD implementation → gate; a green phase that left no
@@ -25,6 +25,7 @@ import logging
 import os
 import re
 import time
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
@@ -32,7 +33,7 @@ from ..config import Config, ConfigError
 from ..doctor.registry import run_all
 from .brain_select import select_brain
 from .gate import evaluate
-from .memory import MemoryClient, resolve_memory_client
+from .memory import BootstrapContractError, MemoryClient, resolve_memory_client
 from .result import STATUS_ICON, PhaseResult, RunReport, RunStatus
 from .worktree import WorktreeError, ensure_worktree
 from .workflow import (
@@ -65,6 +66,13 @@ _PROGRESS_ICON = STATUS_ICON
 # Soft cap on grounding lines injected into the phase prompt (pinned + recall +
 # explore neighbours), so graph enrichment can't balloon the context.
 _GROUNDING_CAP = 12
+
+# A degraded server bootstrap remains useful, but not every missing lane is safe
+# to ignore. Pinned memory can contain standing guardrails, state prevents
+# duplicate shipping, and policy is reserved for server-driven constraints.
+# Recall/upcoming enrich context and may fail-soft while those strict lanes stay
+# healthy.
+_STRICT_BOOTSTRAP_COMPONENTS = frozenset({"pinned", "state", "policy"})
 
 # issue #12: a long autonomous run is opaque — each `claude -p` phase captures
 # its child's output, and the rich table renders only at the end, so an operator
@@ -103,6 +111,11 @@ def _auth_failure_hint(stdout: str, stderr: str, issue: int) -> str | None:
 
 def _state_key(issue: int, label: str | None = None) -> str:
     return f"run:{issue}" if label is None else f"run:{issue}:{label}"
+
+
+def _bootstrap_session_id(issue: int) -> str:
+    """Return a unique server-valid audit correlation for one run attempt."""
+    return f"kagura-engineer-{issue}-{uuid.uuid4().hex}"
 
 
 def run_idea(
@@ -197,26 +210,71 @@ def run_idea(
         return _finish(resume_hint="run `kagura-engineer setup` to fix the environment, then retry")
     _record(PhaseResult("guard", RunStatus.OK, "all blocking checks passed"))
 
-    # 1. recall — grounding + resume point. Memory is core: a failure here
-    # is a hard FAIL (we do not run ungrounded), surfaced cleanly not as a crash.
+    # 1. recall — one session-start bootstrap supplies grounding + resume state.
+    # Total failures and strict-component degradation fail closed; recall and
+    # upcoming component failures may proceed with the healthy guardrail/state
+    # lanes returned by the same fail-soft envelope.
     recalled_ids: list[str] = []
     recalled: list[tuple[str, str]] = []
     pinned: list[str] = []
-    grounding: list[str] = []
+    upcoming: list[str] = []
+    instructions = ""
+    memory_grounding: list[str] = []
+    bootstrap_session = _bootstrap_session_id(issue)
+    state_key = _state_key(issue, run_label)
     try:
-        # Control arm (ground=False): pull NO grounding — skip pinned/recall
-        # entirely so the loop runs ungrounded. Resume state is read either way.
-        if ground:
-            pinned = mem.load_pinned(cfg.context_id)
-            recalled = mem.recall_detailed(
-                cfg.context_id, f"issue {issue} implementation context", k=5
+        # Control arm (ground=False): ask the server for state only. This keeps
+        # resume semantics identical while avoiding every memory-read lane.
+        bootstrap = mem.bootstrap(
+            cfg.context_id,
+            agent_id=cfg.agent_id or None,
+            session_id=bootstrap_session,
+            query=f"issue {issue} implementation context" if ground else None,
+            k=5,
+            include=None if ground else ["state"],
+            state_key=state_key,
+        )
+        statuses = ",".join(
+            f"{name}={status}" for name, status in bootstrap.component_statuses
+        )
+        _emit(
+            "memory bootstrap: "
+            f"agent={bootstrap.agent_id or 'local'} "
+            f"session={bootstrap.session_id or bootstrap_session} "
+            f"components={statuses or 'none'}"
+        )
+        strict_failures = set(bootstrap.failed_components).intersection(
+            _STRICT_BOOTSTRAP_COMPONENTS
+        )
+        if strict_failures:
+            raise BootstrapContractError(
+                "strict bootstrap components failed: "
+                + ", ".join(sorted(strict_failures))
             )
+
+        if ground:
+            pinned = list(bootstrap.pinned)
+            recalled = list(bootstrap.recalled)
+            upcoming = list(bootstrap.upcoming)
+            instructions = bootstrap.instructions.strip()
             recalled_ids = [mid for mid, _ in recalled]
-            grounding = pinned + [s for _, s in recalled]
-        resumed = mem.get_state(cfg.context_id, _state_key(issue, run_label))
+            seen: set[str] = set()
+            for summary in [*pinned, *(s for _, s in recalled), *upcoming]:
+                if summary and summary not in seen:
+                    memory_grounding.append(summary)
+                    seen.add(summary)
+        resumed = bootstrap.state.get(state_key)
+        if resumed is not None and not isinstance(resumed, dict):
+            raise BootstrapContractError(
+                f"bootstrap state {state_key!r} is not an object"
+            )
     except Exception as exc:  # noqa: BLE001 — convert any SDK leak to a FAIL phase
         _log.exception("run recall phase failed")
-        _record(PhaseResult("recall", RunStatus.FAIL, f"memory recall failed: {type(exc).__name__}: {exc}"))
+        _record(PhaseResult(
+            "recall",
+            RunStatus.FAIL,
+            f"memory bootstrap failed: {type(exc).__name__}: {exc}",
+        ))
         return _finish()
 
     # 1a. expand grounding with graph neighbours of the top hit (recall→explore):
@@ -224,16 +282,29 @@ def run_idea(
     # must NOT fail recall (a hard FAIL above); a soft cap bounds injected context.
     if recalled:
         try:
-            seen = set(grounding)
+            seen = set(memory_grounding)
             for _, summary in mem.explore(cfg.context_id, recalled[0][0], depth=1):
-                if summary and summary not in seen and len(grounding) < _GROUNDING_CAP:
-                    grounding.append(summary)
+                if (
+                    summary
+                    and summary not in seen
+                    and len(memory_grounding) < _GROUNDING_CAP
+                ):
+                    memory_grounding.append(summary)
                     seen.add(summary)
         except Exception:  # noqa: BLE001 — graph enrichment is best-effort
             _log.exception("run explore enrichment failed (non-fatal)")
 
+    grounding = (
+        ([f"Memory context instructions:\n{instructions}"] if instructions else [])
+        + memory_grounding
+    )
+
     if ground:
-        detail = f"{len(grounding)} memories" + (" (resuming)" if resumed else "")
+        detail = f"{len(memory_grounding)} memories"
+        if bootstrap.failed_components:
+            detail += " (degraded: " + ", ".join(bootstrap.failed_components) + ")"
+        if resumed:
+            detail += " (resuming)"
     else:
         # Control arm: name the disabled-grounding state so the report is honest
         # about which A/B arm produced it.
@@ -247,6 +318,8 @@ def run_idea(
     if ground:
         _emit(
             f"grounding: pinned {len(pinned)} + recalled {len(recalled)} "
+            f"+ upcoming {len(upcoming)} "
+            f"+ instructions {'yes' if instructions else 'no'} "
             f"from context {cfg.context_id or 'local'}"
         )
     else:

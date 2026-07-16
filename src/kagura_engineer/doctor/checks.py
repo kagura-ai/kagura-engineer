@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -316,6 +317,117 @@ def check_memory_cloud(
         )
     return CheckResult(
         "memory-cloud", Status.OK, f"reachable at {host_only}; auth={auth.detail}"
+    )
+
+
+_BOOTSTRAP_MIN_SERVER_VERSION = (0, 49, 0)
+_BOOTSTRAP_VERSION_TEXT = ".".join(str(part) for part in _BOOTSTRAP_MIN_SERVER_VERSION)
+
+
+def _server_version_tuple(value: object) -> tuple[int, int, int] | None:
+    if not isinstance(value, str):
+        return None
+    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?", value.strip())
+    if not match:
+        return None
+    return tuple(int(part) for part in match.groups())
+
+
+def check_memory_cloud_version(base_url: str, *, fetch=_http_json) -> CheckResult:
+    """Gate the agent-bootstrap lane on memory-cloud v0.49.0+."""
+    from urllib.parse import urlparse
+
+    url = f"{base_url.rstrip('/')}/api/v1/system/info"
+    try:
+        host_only = urlparse(base_url).hostname or "configured Memory Cloud"
+    except (TypeError, ValueError):
+        host_only = "configured Memory Cloud"
+    try:
+        payload = fetch(url)
+    except Exception as exc:  # noqa: BLE001 - every network/JSON leak is a clean FAIL
+        return CheckResult(
+            "memory-cloud-version",
+            Status.FAIL,
+            "could not verify bootstrap-compatible server version at "
+            f"{host_only}: {type(exc).__name__}",
+            f"upgrade Memory Cloud to v{_BOOTSTRAP_VERSION_TEXT}+ and verify "
+            "its system info endpoint",
+        )
+    version = payload.get("version") if isinstance(payload, dict) else None
+    parsed = _server_version_tuple(version)
+    if parsed is None:
+        return CheckResult(
+            "memory-cloud-version",
+            Status.FAIL,
+            f"server info returned an invalid version: {version!r}",
+            f"upgrade Memory Cloud to v{_BOOTSTRAP_VERSION_TEXT}+",
+        )
+    if parsed < _BOOTSTRAP_MIN_SERVER_VERSION:
+        return CheckResult(
+            "memory-cloud-version",
+            Status.FAIL,
+            f"Memory Cloud v{version} lacks get_agent_bootstrap",
+            f"upgrade Memory Cloud to v{_BOOTSTRAP_VERSION_TEXT}+",
+        )
+    return CheckResult(
+        "memory-cloud-version",
+        Status.OK,
+        f"Memory Cloud v{version} supports agent bootstrap",
+    )
+
+
+_MEMORY_AGENT_HINT = (
+    "register this harness once with KaguraClient.register_agent, bind it to "
+    "config.context_id, and set config.agent_id; see README § Agent bootstrap "
+    "identity"
+)
+
+
+def _fetch_memory_agent_bootstrap(cfg):
+    from ..run.memory import KaguraCloudClient
+
+    client = KaguraCloudClient.from_config(cfg)
+    try:
+        return client.bootstrap(
+            cfg.context_id,
+            agent_id=cfg.agent_id or None,
+            session_id="kagura-engineer-doctor",
+            query=None,
+            include=["state"],
+        )
+    finally:
+        client.close()
+
+
+def check_memory_agent(cfg, *, fetch=_fetch_memory_agent_bootstrap) -> CheckResult:
+    """Verify the configured agent exists and is bound to this context."""
+    if not cfg.agent_id:
+        return CheckResult(
+            "memory-agent",
+            Status.FAIL,
+            "config.agent_id is missing; agent bootstrap cannot authenticate identity",
+            _MEMORY_AGENT_HINT,
+        )
+    try:
+        bootstrap = fetch(cfg)
+    except Exception as exc:  # noqa: BLE001 - SDK/auth/identity failures fail closed
+        return CheckResult(
+            "memory-agent",
+            Status.FAIL,
+            f"agent {cfg.agent_id} bootstrap probe failed: {type(exc).__name__}",
+            _MEMORY_AGENT_HINT,
+        )
+    if "state" in bootstrap.failed_components:
+        return CheckResult(
+            "memory-agent",
+            Status.FAIL,
+            f"agent {cfg.agent_id} resolved, but bootstrap state is degraded",
+            "repair the Memory Cloud state lane before running the harness",
+        )
+    return CheckResult(
+        "memory-agent",
+        Status.OK,
+        f"agent {bootstrap.agent_id} bound to context {bootstrap.context_id}",
     )
 
 

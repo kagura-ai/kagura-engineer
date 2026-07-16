@@ -15,6 +15,7 @@ VALID_PROFILE = "coding"
 VALID_MEMORY_URL = "https://memory.kagura-ai.com"
 VALID_WORKSPACE = "ws-coding-dev"
 VALID_CONTEXT_UUID = "550e8400-e29b-41d4-a716-446655440000"
+VALID_AGENT_UUID = "7b6e5d4c-3a29-4817-9605-4f3e2d1c0b9a"
 
 # Canonical kwargs for a valid ExecutionProfile (issue #70) — shared by the
 # render tests that attach a profile to a report, so a new profile field is a

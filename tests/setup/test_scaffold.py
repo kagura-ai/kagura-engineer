@@ -73,7 +73,9 @@ class TestEnsureRepoYaml:
         assert wrote is True
         text = (tmp_path / "repo.yaml").read_text(encoding="utf-8")
         # The template documents the real Config fields a user must fill in.
-        for field in ("profile", "memory_backend", "workspace_id", "context_id"):
+        for field in (
+            "profile", "memory_backend", "workspace_id", "context_id", "agent_id"
+        ):
             assert field in text
 
     def test_never_overwrites_existing(self, tmp_path: Path) -> None:

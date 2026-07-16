@@ -10,6 +10,7 @@ import pytest
 
 from kagura_engineer.run import failover_memory as fm
 from kagura_engineer.run.failover_memory import FailoverMemoryClient, default_wal_path
+from kagura_engineer.run.memory import MemoryBootstrap
 
 try:
     import fcntl
@@ -37,6 +38,17 @@ class _FakeInner:
         self.closed = False
 
     # reads
+    def bootstrap(
+        self, context_id, *, agent_id, session_id, query, k=5,
+        include=None, state_key=None,
+    ):
+        self.calls.append(("bootstrap", context_id))
+        return MemoryBootstrap(
+            agent_id=agent_id,
+            context_id=context_id,
+            session_id=session_id,
+            recalled=(("m1", "r"),),
+        )
     def load_pinned(self, context_id):
         self.calls.append(("load_pinned", context_id)); return ["pin"]
     def recall(self, context_id, query, *, k=5, tags=None, min_importance=0.0):
@@ -82,6 +94,19 @@ def test_reads_delegate_to_inner(tmp_path):
     assert [m for m, _ in c._inner.calls] == [
         "load_pinned", "recall", "recall_detailed", "explore", "get_state",
     ]
+
+
+def test_bootstrap_delegates_as_one_inner_read(tmp_path):
+    c = _client(tmp_path)
+    result = c.bootstrap(
+        "ctx",
+        agent_id="agent-1",
+        session_id="session-1",
+        query="q",
+        include=["recall"],
+    )
+    assert result.recalled == (("m1", "r"),)
+    assert c._inner.calls == [("bootstrap", "ctx")]
 
 
 def test_close_delegates_to_inner(tmp_path):
