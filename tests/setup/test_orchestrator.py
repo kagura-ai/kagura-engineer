@@ -46,6 +46,7 @@ def test_step_names_are_in_canonical_order():
     assert STEP_NAMES == [
         "git",
         "claude-code",
+        "headless-permissions",
         "gh",
         "ollama",
         "ollama-models",
@@ -70,6 +71,10 @@ def test_run_plan_runs_all_steps_and_aggregates(monkeypatch, valid_config):
     monkeypatch.setattr(
         "kagura_engineer.setup.claude.ensure_claude_login",
         _stub("claude-code"),
+    )
+    monkeypatch.setattr(
+        "kagura_engineer.setup.headless_permissions.ensure_headless_permissions",
+        _stub("headless-permissions"),
     )
     monkeypatch.setattr(
         "kagura_engineer.setup.gh.ensure_gh_auth",
@@ -97,6 +102,7 @@ def test_run_plan_runs_all_steps_and_aggregates(monkeypatch, valid_config):
     assert [r.name for r in report.ran] == [
         "git",
         "claude-code",
+        "headless-permissions",
         "gh",
         "ollama",
         "memory-cloud",
@@ -120,6 +126,7 @@ def test_run_plan_only_runs_named_step(monkeypatch, valid_config):
 
     monkeypatch.setattr("kagura_engineer.setup.git.ensure_git", _stub("git"))
     monkeypatch.setattr("kagura_engineer.setup.claude.ensure_claude_login", _stub("claude-code"))
+    monkeypatch.setattr("kagura_engineer.setup.headless_permissions.ensure_headless_permissions", _stub("headless-permissions"))
     monkeypatch.setattr("kagura_engineer.setup.gh.ensure_gh_auth", _stub("gh"))
     monkeypatch.setattr("kagura_engineer.setup.ollama.ensure_ollama_up", _stub("ollama"))
     monkeypatch.setattr("kagura_engineer.setup.ollama.pull_ollama_models", _stub("ollama-models"))
@@ -140,6 +147,10 @@ def test_run_plan_isolates_step_exceptions(monkeypatch, valid_config):
     monkeypatch.setattr(
         "kagura_engineer.setup.claude.ensure_claude_login",
         lambda **kw: StepResult("claude-code", StepStatus.OK, "ok"),
+    )
+    monkeypatch.setattr(
+        "kagura_engineer.setup.headless_permissions.ensure_headless_permissions",
+        lambda *a, **kw: StepResult("headless-permissions", StepStatus.OK, "ok"),
     )
     monkeypatch.setattr(
         "kagura_engineer.setup.gh.ensure_gh_auth",
@@ -177,6 +188,10 @@ def test_run_plan_propagates_failed_and_needs_user_into_is_blocked(monkeypatch, 
     monkeypatch.setattr(
         "kagura_engineer.setup.claude.ensure_claude_login",
         lambda **kw: StepResult("claude-code", StepStatus.NEEDS_USER, "log in"),
+    )
+    monkeypatch.setattr(
+        "kagura_engineer.setup.headless_permissions.ensure_headless_permissions",
+        lambda *a, **kw: StepResult("headless-permissions", StepStatus.OK, "ok"),
     )
     monkeypatch.setattr(
         "kagura_engineer.setup.gh.ensure_gh_auth",
@@ -218,6 +233,7 @@ def test_run_plan_passes_platform_and_config_to_steps(monkeypatch, valid_config)
 
     monkeypatch.setattr("kagura_engineer.setup.git.ensure_git", _capture("git"))
     monkeypatch.setattr("kagura_engineer.setup.claude.ensure_claude_login", _capture("claude-code"))
+    monkeypatch.setattr("kagura_engineer.setup.headless_permissions.ensure_headless_permissions", _capture("headless-permissions"))
     monkeypatch.setattr("kagura_engineer.setup.gh.ensure_gh_auth", _capture("gh"))
     monkeypatch.setattr("kagura_engineer.setup.ollama.ensure_ollama_up", _capture("ollama"))
     monkeypatch.setattr("kagura_engineer.setup.ollama.pull_ollama_models", _capture("ollama-models"))
@@ -256,6 +272,7 @@ def test_run_plan_degraded_runs_config_free_and_skips_rest(monkeypatch):
     for dotted in (
         "kagura_engineer.setup.ollama.ensure_ollama_up",
         "kagura_engineer.setup.ollama.pull_ollama_models",
+        "kagura_engineer.setup.headless_permissions.ensure_headless_permissions",
         "kagura_engineer.setup.memory_cloud.ensure_memory_cloud_reachable",
         "kagura_engineer.setup.memory_mcp.ensure_memory_mcp_config",
     ):
@@ -270,9 +287,9 @@ def test_run_plan_degraded_runs_config_free_and_skips_rest(monkeypatch):
     assert any(r.name == "config" for r in report.needs_user)
     # ollama/memory* land in SKIPPED with the waiting-on-config reason.
     skipped = {r.name: r for r in report.skipped}
-    assert {"ollama", "ollama-models", "memory-cloud", "memory-mcp"} <= set(skipped)
+    assert {"headless-permissions", "ollama", "ollama-models", "memory-cloud", "memory-mcp"} <= set(skipped)
     assert all("config" in skipped[n].detail for n in
-               ("ollama", "ollama-models", "memory-cloud", "memory-mcp"))
+               ("headless-permissions", "ollama", "ollama-models", "memory-cloud", "memory-mcp"))
     assert report.failed == []
     assert report.is_blocked is True  # NEEDS_USER present
 
@@ -303,6 +320,7 @@ def test_run_plan_threads_full_into_memory_mcp_step(monkeypatch, valid_config):
     for dotted, nm in [
         ("kagura_engineer.setup.git.ensure_git", "git"),
         ("kagura_engineer.setup.claude.ensure_claude_login", "claude-code"),
+        ("kagura_engineer.setup.headless_permissions.ensure_headless_permissions", "headless-permissions"),
         ("kagura_engineer.setup.gh.ensure_gh_auth", "gh"),
         ("kagura_engineer.setup.ollama.ensure_ollama_up", "ollama"),
         ("kagura_engineer.setup.ollama.pull_ollama_models", "ollama-models"),

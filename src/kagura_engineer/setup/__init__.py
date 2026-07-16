@@ -13,11 +13,13 @@ Step order
 
 The canonical order is:
 
-    git, claude-code, gh, ollama, ollama-models, memory-cloud
+    git, claude-code, headless-permissions, gh, ollama, ollama-models,
+    memory-cloud, memory-mcp
 
 `git` is first because the worktree is the only one with a
-filesystem precondition. `claude-code` and `gh` come next because
-they are the auth-bound tools the rest of the pipeline leans on.
+filesystem precondition. `claude-code` and `headless-permissions` come next,
+followed by `gh`, because these tools establish the brain and auth-bound
+environment the rest of the pipeline leans on.
 `ollama` (daemon up) precedes `ollama-models` (pull models) for
 obvious reasons. `memory-cloud` is last because its check is
 purely a reachability probe and does not influence the earlier
@@ -48,7 +50,15 @@ import time
 from typing import Callable
 
 from ..config import Config
-from . import claude, gh, git, memory_cloud, memory_mcp, ollama
+from . import (
+    claude,
+    gh,
+    git,
+    headless_permissions,
+    memory_cloud,
+    memory_mcp,
+    ollama,
+)
 from .platform import detect
 from .result import SetupReport, StepResult, StepStatus
 
@@ -58,6 +68,7 @@ _log = logging.getLogger(__name__)
 STEP_NAMES: list[str] = [
     "git",
     "claude-code",
+    "headless-permissions",
     "gh",
     "ollama",
     "ollama-models",
@@ -84,6 +95,13 @@ _STEP_FNS: dict[str, Callable[..., StepResult]] = {
     ),
     "claude-code": lambda platform, cfg, *, no_input, dry_run, full: claude.ensure_claude_login(
         no_input=no_input, dry_run=dry_run
+    ),
+    "headless-permissions": (
+        lambda platform, cfg, *, no_input, dry_run, full: (
+            headless_permissions.ensure_headless_permissions(
+                cfg, no_input=no_input, dry_run=dry_run
+            )
+        )
     ),
     "gh": lambda platform, cfg, *, no_input, dry_run, full: gh.ensure_gh_auth(
         platform, no_input=no_input, dry_run=dry_run
