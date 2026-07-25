@@ -5,7 +5,14 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 
 class ConfigError(Exception):
@@ -99,6 +106,30 @@ class Config(BaseModel):
     # smoke-verified end-to-end, and codex has no per-call tool allow-list, so
     # the MEMORY_TOOLS confinement claude gets does not apply there.
     enable_codex_mcp: bool = False
+    # issue #92: what to do when the start phase's one-line task restatement
+    # (the KAGURA_TASK marker) does not match the assigned issue.
+    #   "gate" (default) — halt BLOCKED before the implement phase runs. The
+    #       campaign failure this exists for burned a full pipeline per issue and
+    #       produced a PR implementing unrelated work, so the cheap halt wins.
+    #   "warn" — record the mismatch on the progress stream and continue.
+    #   "off"  — do not ask for the echo's verdict at all.
+    # Only ever consulted when the harness could actually read the issue: with no
+    # brief there is nothing to match against, so all three behave as "off".
+    task_echo: Literal["gate", "warn", "off"] = "gate"
+
+    @field_validator("task_echo", mode="before")
+    @classmethod
+    def _yaml_off_is_a_string(cls, value: object) -> object:
+        """Accept an unquoted `task_echo: off`.
+
+        YAML 1.1 — which PyYAML implements — resolves bare `off` to the boolean
+        `False`, so the most natural way to disable this ends up failing literal
+        validation with a message that never mentions quoting. Map it back rather
+        than making correctness depend on the user remembering `"off"`. `True`
+        (`on`/`yes`) is deliberately NOT mapped: there is no policy it names, so
+        it must still fail loudly.
+        """
+        return "off" if value is False else value
 
     def resolve_mcp_config(self, repo_root: str | Path) -> str | None:
         """Return the Claude Code MCP config path to attach for in-task recall.

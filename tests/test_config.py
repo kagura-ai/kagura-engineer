@@ -388,3 +388,50 @@ def test_lenient_never_raises_on_directory(tmp_path):
     load = load_config_lenient(tmp_path)  # a directory, not a file
     assert load.cfg is None
     assert load.missing is True
+
+
+# --- task-echo policy (issue #92) --------------------------------------------
+
+
+def test_task_echo_defaults_to_gate(valid_config):
+    # The default must be the protective one: the campaign failure produced a
+    # merged-looking PR implementing unrelated work, which is far more expensive
+    # than a halt.
+    assert valid_config.task_echo == "gate"
+
+
+def test_task_echo_accepts_the_documented_policies(tmp_path, valid_repo_yaml_text):
+    for policy in ("gate", "warn", "off"):
+        p = tmp_path / f"repo-{policy}.yaml"
+        p.write_text(valid_repo_yaml_text + f"task_echo: {policy}\n")
+        assert load_config(p).task_echo == policy
+
+
+def test_task_echo_rejects_an_unknown_policy(tmp_path, valid_repo_yaml_text):
+    p = tmp_path / "repo.yaml"
+    p.write_text(valid_repo_yaml_text + "task_echo: sometimes\n")
+    with pytest.raises(ConfigError):
+        load_config(p)
+
+
+def test_scaffold_template_documents_task_echo_and_parses():
+    import yaml as _yaml
+    from kagura_engineer.setup.scaffold import REPO_YAML_TEMPLATE
+    assert "task_echo" in REPO_YAML_TEMPLATE
+    _yaml.safe_load(REPO_YAML_TEMPLATE)  # the commented block must not break YAML
+
+
+def test_unquoted_yaml_off_is_accepted_as_the_off_policy(tmp_path, valid_repo_yaml_text):
+    # YAML 1.1 resolves a bare `off` to the boolean False; the user wrote the
+    # documented value and must not be punished for the spec's quirk.
+    p = tmp_path / "repo.yaml"
+    p.write_text(valid_repo_yaml_text + "task_echo: off\n")
+    assert load_config(p).task_echo == "off"
+
+
+def test_unquoted_yaml_on_is_still_rejected(tmp_path, valid_repo_yaml_text):
+    # `on` names no policy — it must fail loudly rather than be coerced.
+    p = tmp_path / "repo.yaml"
+    p.write_text(valid_repo_yaml_text + "task_echo: on\n")
+    with pytest.raises(ConfigError):
+        load_config(p)

@@ -3,7 +3,7 @@
 > [!NOTE]
 > Historical design record. It may describe pre-implementation state, internal
 > plan numbers, or behavior that has since changed. See the
-> [current README](../../../README.md) and [document map](../../README.md).
+> [current README](https://github.com/kagura-ai/kagura-engineer/blob/main/README.md) and [document map](https://github.com/kagura-ai/kagura-engineer/blob/main/docs/README.md).
 
 **Issue:** #51 (deferred from #48). **Date:** 2026-06-10. **Status:** approved, pre-implementation.
 

@@ -65,18 +65,35 @@ class _FakeMemory:
     def set_state(self, context_id, key, value): self.state[key] = value
 
 
-def _patch_boundaries(monkeypatch, *, blocking=False, phases=None, worktree=None):
+def _patch_boundaries(
+    monkeypatch, *, blocking=False, phases=None, worktree=None,
+    issue_brief=None, calls=None,
+):
     """Patch guard/worktree/workflow. `phases` maps phase->PhaseInvocation.
 
     `worktree`, if given, is the path `ensure_worktree` returns — pass a real
     tmp_path when the test inspects files the run writes there (else a fake path).
+
+    `issue_brief` (issue #92) is what the patched `fetch_issue` returns. It
+    defaults to None — "gh could not read the issue" — which is the degraded
+    path that reproduces the pre-#92 prompt shape, so every pre-existing test
+    keeps its original behaviour and none of them shells out to real `gh`.
+
+    `calls`, if given, collects `(phase, kwargs)` per `invoke_phase` so a test
+    can assert which phases actually ran and what they were handed.
     """
     checks = [CheckResult("gh-issue-driven", Status.FAIL if blocking else Status.OK, "x")]
     monkeypatch.setattr("kagura_engineer.run.run_all", lambda cfg: checks)
     monkeypatch.setattr("kagura_engineer.run.ensure_worktree", lambda root, issue, base="HEAD", label=None: worktree or Path(f"/wt/run-{issue}"))
     phases = phases or {}
+    monkeypatch.setattr(
+        "kagura_engineer.run.fetch_issue", lambda issue, cwd: issue_brief,
+        raising=False,
+    )
 
     def _invoke(phase, issue, worktree, grounding, **kw):
+        if calls is not None:
+            calls.append((phase, kw))
         # Unspecified phases default to green so a test only declares the phases
         # it cares about (e.g. a start-red test need not spell out implement/ship).
         return phases.get(phase) or PhaseInvocation(phase, 0, "", "", "green", None)
@@ -1148,3 +1165,146 @@ def test_run_drain_failure_does_not_fail_run(monkeypatch):
 
     report = run_idea(_cfg(), 42, memory=_BoomDrain(), repo_root=Path("/repo"))
     assert report.status is RunStatus.OK                 # drain failure is non-fatal
+
+
+# --- verbatim issue injection + task-echo gate (issue #92) --------------------
+# The harness fetches the issue itself and injects it into every phase prompt,
+# then gates on the start phase's one-line restatement BEFORE dispatching the
+# 30-minute implement phase — the campaign failure was a pipeline that ran to a
+# PR while implementing an entirely different task.
+
+
+def _brief(title="Add tetris high-score persistence", body="Persist across reloads."):
+    from kagura_engineer.run.issue import IssueBrief
+    return IssueBrief(number=42, title=title, body=body)
+
+
+def _echo(text):
+    """A green start invocation whose task echo is `text` (None = marker dropped)."""
+    return PhaseInvocation("start", 0, "", "", "green", None, task_echo=text)
+
+
+def test_issue_brief_is_threaded_into_every_phase_prompt(monkeypatch):
+    calls: list[tuple] = []
+    brief = _brief()
+    _patch_boundaries(monkeypatch, issue_brief=brief, calls=calls, phases={
+        "start": _echo("Persist the tetris high score"),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+    run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert [phase for phase, _ in calls] == ["start", "implement", "ship"]
+    assert all(kw.get("brief") is brief for _, kw in calls)
+
+
+def test_unfetchable_issue_still_runs_with_no_brief(monkeypatch):
+    # gh missing/unauthenticated must forfeit the hardening, never fail the run.
+    calls: list[tuple] = []
+    _patch_boundaries(monkeypatch, issue_brief=None, calls=calls, phases={
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK
+    assert all(kw.get("brief") is None for _, kw in calls)
+
+
+def test_task_echo_mismatch_blocks_before_implement(monkeypatch):
+    calls: list[tuple] = []
+    _patch_boundaries(
+        monkeypatch, issue_brief=_brief(), calls=calls,
+        phases={"start": _echo("Implement a chess move-history display panel")},
+    )
+    mem = _FakeMemory()
+    report = run_idea(_cfg(), 42, memory=mem, repo_root=Path("/repo"))
+    assert report.status is RunStatus.BLOCKED
+    # The whole point: the expensive phase never ran.
+    assert [phase for phase, _ in calls] == ["start"]
+    start = [p for p in report.phases if p.name == "start"][0]
+    assert start.status is RunStatus.BLOCKED
+    assert "move-history" in start.detail
+    assert mem.state.get("run:42") is not None  # resumable
+
+
+def test_task_echo_match_proceeds_to_implement(monkeypatch):
+    calls: list[tuple] = []
+    _patch_boundaries(monkeypatch, issue_brief=_brief(), calls=calls, phases={
+        "start": _echo("Persist the tetris high score across reloads"),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK
+    assert [phase for phase, _ in calls] == ["start", "implement", "ship"]
+
+
+def test_dropped_task_echo_marker_does_not_halt(monkeypatch):
+    # A missing marker is "unverifiable", not "mismatched". Halting here would
+    # re-introduce the #64 false-negative class on brains that drop markers.
+    calls: list[tuple] = []
+    _patch_boundaries(monkeypatch, issue_brief=_brief(), calls=calls, phases={
+        "start": _echo(None),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK
+    assert [phase for phase, _ in calls] == ["start", "implement", "ship"]
+
+
+def test_task_echo_gate_is_skipped_without_a_brief(monkeypatch):
+    # Nothing to match against — a wild echo cannot be judged, so it cannot halt.
+    _patch_boundaries(monkeypatch, issue_brief=None, phases={
+        "start": _echo("Implement a chess move-history display panel"),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK
+
+
+def test_task_echo_warn_mode_records_the_mismatch_but_proceeds(monkeypatch):
+    calls: list[tuple] = []
+    _patch_boundaries(monkeypatch, issue_brief=_brief(), calls=calls, phases={
+        "start": _echo("Implement a chess move-history display panel"),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+    cfg = _cfg().model_copy(update={"task_echo": "warn"})
+    progress: list[str] = []
+    report = run_idea(cfg, 42, memory=_FakeMemory(), repo_root=Path("/repo"),
+                      progress=progress.append)
+    assert report.status is RunStatus.OK
+    assert [phase for phase, _ in calls] == ["start", "implement", "ship"]
+    assert any("mismatch" in line.lower() for line in progress)
+
+
+def test_task_echo_off_skips_the_gate_entirely(monkeypatch):
+    calls: list[tuple] = []
+    _patch_boundaries(monkeypatch, issue_brief=_brief(), calls=calls, phases={
+        "start": _echo("Implement a chess move-history display panel"),
+        "ship": PhaseInvocation("ship", 0, "", "", "green", "https://x/pull/9"),
+    })
+    cfg = _cfg().model_copy(update={"task_echo": "off"})
+    report = run_idea(cfg, 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.OK
+    assert [phase for phase, _ in calls] == ["start", "implement", "ship"]
+
+
+def test_task_echo_halt_hint_points_at_the_issue(monkeypatch):
+    _patch_boundaries(
+        monkeypatch, issue_brief=_brief(),
+        phases={"start": _echo("Implement a chess move-history display panel")},
+    )
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    assert report.status is RunStatus.BLOCKED
+    assert "42" in (report.resume_hint or "")
+    assert "issue" in (report.resume_hint or "").lower()
+
+
+def test_task_echo_gate_never_runs_when_start_already_halted(monkeypatch):
+    # A red start halts on the verdict; the echo gate must not overwrite that
+    # phase result with a less accurate reason.
+    _patch_boundaries(
+        monkeypatch, issue_brief=_brief(),
+        phases={"start": PhaseInvocation("start", 0, "", "", "red", None,
+                                         task_echo="something unrelated entirely")},
+    )
+    report = run_idea(_cfg(), 42, memory=_FakeMemory(), repo_root=Path("/repo"))
+    start = [p for p in report.phases if p.name == "start"][0]
+    assert start.status is RunStatus.BLOCKED
+    assert "gate halt" in start.detail

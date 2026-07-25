@@ -33,6 +33,7 @@ from ..config import Config, ConfigError
 from ..doctor.registry import run_all
 from .brain_select import select_brain
 from .gate import evaluate
+from .issue import fetch_issue, task_echo_matches
 from .memory import BootstrapContractError, MemoryClient, resolve_memory_client
 from .result import STATUS_ICON, PhaseResult, RunReport, RunStatus
 from .worktree import WorktreeError, ensure_worktree
@@ -341,6 +342,21 @@ def run_idea(
         return _finish()
     _record(PhaseResult("worktree", RunStatus.OK, str(wt)))
 
+    # 2a. issue acquisition (issue #92). The harness reads the issue itself and
+    # injects it verbatim into every phase prompt, instead of naming a number and
+    # trusting the brain to fetch it. Claude did; local/OSS brains skipped the
+    # read and improvised a task from salient repo context, producing PRs that
+    # implemented something else entirely. Best-effort: an unreadable issue
+    # forfeits the hardening (and the echo gate below) but never fails the run.
+    brief = fetch_issue(issue, wt)
+    if brief is not None:
+        _emit(f"issue: #{brief.number} {brief.title}")
+    else:
+        _emit(
+            "issue: could not read it from GitHub — phase prompts fall back to "
+            "the issue number alone (task-echo gate disabled)"
+        )
+
     # 3-5. act: start (design gate) → implement (TDD) → ship (PR gate).
     try:
         brain_call = select_brain(cfg, os.environ)
@@ -373,7 +389,11 @@ def run_idea(
                                # policy + effort hint (shapes the implement
                                # prompt only — see build_prompt).
                                code_review=cfg.review.code_review,
-                               review_effort=cfg.review.effort)
+                               review_effort=cfg.review.effort,
+                               # issue #92: the verbatim issue text, so the
+                               # brain implements the assigned task rather than
+                               # one it inferred from the repository.
+                               brief=brief)
         except (OSError, ValueError) as exc:
             # ValueError: the codex adapter parses mcp_config itself and raises
             # on a missing/non-JSON file (a stale memory_mcp_config path) — a
@@ -426,6 +446,47 @@ def run_idea(
                 worktree=str(wt),
                 resume_hint=f"review the {phase} gate, then re-run `kagura-engineer run {issue}`",
             )
+        # issue #92: the task-echo gate. `start` restates the assigned task in
+        # one line; compare it to the issue BEFORE dispatching the 30-minute
+        # implement phase. This is the cheap half of the fix — injection (above)
+        # prevents most substitutions, this catches the ones that survive it.
+        #
+        # Deliberately placed after the verdict gate so a red start keeps its own,
+        # more accurate halt reason. Runs only when there is a brief to match
+        # against and the policy asks for it; a DROPPED marker is treated as
+        # "unverifiable", not "mismatched" — halting on absence would re-create
+        # the #64 false-negative class on brains that emit markers stochastically,
+        # which is precisely the population this feature serves.
+        if (
+            phase == "start"
+            and brief is not None
+            and cfg.task_echo != "off"
+            and inv.task_echo is not None
+            and not task_echo_matches(inv.task_echo, brief)
+        ):
+            mismatch = (
+                f"start restated its task as {inv.task_echo!r}, which does not "
+                f"match issue #{brief.number} ({brief.title!r}) — the phase "
+                "appears to have substituted a different task"
+            )
+            if cfg.task_echo == "warn":
+                _emit(f"⚠ task echo mismatch (warn, continuing): {mismatch}")
+            else:
+                try:
+                    mem.set_state(cfg.context_id, state_key,
+                                  {"halted_at": phase, "verdict": "task-mismatch"})
+                except Exception:  # noqa: BLE001 — a memory hiccup must not mask the halt
+                    _log.exception("run task-echo halt set_state failed (non-fatal)")
+                _record(PhaseResult(phase, RunStatus.BLOCKED, mismatch,
+                                    verdict=decision.verdict))
+                return _finish(
+                    worktree=str(wt),
+                    resume_hint=(
+                        f"confirm what issue #{issue} actually asks for (the start "
+                        "phase understood something else), then re-run "
+                        f"`kagura-engineer run {issue}`"
+                    ),
+                )
         # issue #9: a green implement phase that left no commit is a clear,
         # named failure — not a confusing "ship red" downstream on an empty diff.
         if phase == "implement" and head_before is not None:

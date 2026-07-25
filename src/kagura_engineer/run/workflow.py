@@ -86,6 +86,7 @@ from pathlib import Path
 from .._launch import run_text
 from ..mcp import MEMORY_TOOLS, memory_tool_ids
 from .brain_select import BrainCall
+from .issue import IssueBrief
 
 _log = logging.getLogger(__name__)
 
@@ -137,6 +138,23 @@ _NATIVE_SHIP_VERDICT_RE = re.compile(
 # red pass through unchanged.
 _SHIP_VERDICT_MAP = {"pass": "green", "fail": "red"}
 
+# Task echo (issue #92). The start phase restates the assigned task in one line
+# so the orchestrator can detect a substituted task before dispatching the
+# 30-minute implement phase. Asked for ABOVE the verdict pair so
+# `_MARKER_PAIR_RE` — which requires VERDICT to be immediately followed by
+# PR_URL — keeps its issue-#54 spoof hardening intact.
+#
+# The window is wider than `_MARKER_TAIL_CHARS` because a restatement is a
+# sentence, not a token, and it can share the tail with the verdict pair. The
+# asymmetry is safe: a mis-parsed echo can only halt a run, never let one
+# proceed that the verdict gate would have stopped, so this window is not
+# load-bearing for the fail-secure contract the way the verdict window is.
+_TASK_TAIL_CHARS = 2000
+_TASK_RE = re.compile(r"^KAGURA_TASK=(.+?)[ \t]*$", re.MULTILINE)
+# Bound what a runaway model can push into the report, the halt message, and the
+# persisted phase log.
+_TASK_ECHO_CAP = 500
+
 
 @dataclass(frozen=True)
 class PhaseInvocation:
@@ -147,6 +165,9 @@ class PhaseInvocation:
     verdict: str | None
     pr_url: str | None
     timed_out: bool = False
+    # issue #92: the start phase's one-line restatement of the assigned task.
+    # None when the phase did not emit the marker (or was never asked to).
+    task_echo: str | None = None
 
 
 def build_prompt(
@@ -155,8 +176,25 @@ def build_prompt(
     mcp_tools: tuple[str, str] = MEMORY_TOOLS,
     branch_override: str | None = None,
     code_review: str = "auto", review_effort: str = "medium",
+    brief: IssueBrief | None = None,
 ) -> str:
     context = "\n".join(f"- {g}" for g in grounding) or "- (no prior memory)"
+    # issue #92: the harness fetched the issue itself; inject it verbatim rather
+    # than naming a number and trusting the model to go read it. Local/OSS brains
+    # skipped that read and improvised a task from salient repo context — five
+    # pipeline-complete PRs, five unrelated implementations. The anti-substitution
+    # sentence names that exact failure mode, because "implement issue #42" reads
+    # as satisfiable by any plausible-looking work when the issue text is absent.
+    assignment = (
+        f"\n{brief.as_prompt_block()}"
+        "The block above is the assigned task, fetched from GitHub by the "
+        "harness. It is authoritative: implement exactly what it asks. Do not "
+        "substitute a different task inferred from the repository's recent "
+        "commits, branches, or salient code — however plausible that other work "
+        "looks, it is out of scope for this run.\n\n"
+        if brief is not None
+        else ""
+    )
     # Unattended dials the delegated skill's HITL down: it proceeds on green/
     # yellow without asking. Our own gate is unchanged — a red/unknown verdict
     # still halts the run, so we never auto-proceed past a failure.
@@ -260,13 +298,27 @@ def build_prompt(
                 "until the PR exists.\n"
             )
         verdict_hint = "KAGURA_VERDICT=<green|yellow|red>   (the phase gate verdict)\n"
+    # issue #92: only `start` is asked to echo the task, because the gate that
+    # consumes it fires between start and implement — an echo from a later phase
+    # would be read by nobody. Requested only when a brief exists: with no issue
+    # text to compare against, the harness cannot judge the echo, so demanding
+    # one would add noise and a marker the run must then explain away.
+    task_hint = (
+        "KAGURA_TASK=<one line, in your own words: the task the issue above "
+        "assigns you>\n"
+        if brief is not None and phase == "start"
+        else ""
+    )
+    lines = "these lines" if task_hint else "these two lines"
     return (
         "You are running inside an automated kagura-engineer run.\n"
         "Relevant memory (recall + pinned guardrails):\n"
-        f"{context}\n\n"
+        f"{context}\n"
+        f"{assignment}\n"
         f"{body}"
         f"{mode}{mcp}"
-        "When finished, print these two lines LAST, exactly:\n"
+        f"When finished, print {lines} LAST, exactly:\n"
+        f"{task_hint}"
         f"{verdict_hint}"
         "KAGURA_PR_URL=<pull-request-url or - if none>\n"
     )
@@ -579,6 +631,22 @@ def parse_verdict(text: str, phase: str | None = None) -> str | None:
     return normalise(native[-1].lower()) if native else None
 
 
+def parse_task_echo(text: str) -> str | None:
+    """The start phase's one-line restatement of the assigned task (issue #92).
+
+    Tail-anchored like the verdict markers, so a `KAGURA_TASK=` line quoted deep
+    in the transcript (typically the model echoing the prompt's own instruction
+    placeholder) is not mistaken for the closing contract. Last match in the
+    window wins; a dropped marker returns None, which the orchestrator treats as
+    "unverifiable" rather than "mismatched".
+    """
+    tail = (text or "")[-_TASK_TAIL_CHARS:]
+    matches = _TASK_RE.findall(tail)
+    if not matches:
+        return None
+    return matches[-1].strip()[:_TASK_ECHO_CAP] or None
+
+
 def parse_pr_url(text: str) -> str | None:
     # Same tail + pair-first anchoring as parse_verdict (issue #54): the URL in
     # the genuine trailing pair wins over a later echoed lone URL, and a `-`
@@ -600,12 +668,14 @@ def invoke_phase(
     mcp_config: str | None = None, timeout: int = _PHASE_TIMEOUT_S,
     branch_override: str | None = None,
     code_review: str = "auto", review_effort: str = "medium",
+    brief: IssueBrief | None = None,
 ) -> PhaseInvocation:
     prompt = build_prompt(phase, issue, grounding, unattended=unattended,
                           mcp_enabled=brain_call.mcp_enabled(mcp_config),
                           mcp_tools=memory_tool_ids(brain_call.backend),
                           branch_override=branch_override,
-                          code_review=code_review, review_effort=review_effort)
+                          code_review=code_review, review_effort=review_effort,
+                          brief=brief)
     # The headless launcher lives in the resolved kagura-brain backend adapter
     # (#40/#51), reached via brain_call: it owns the single launcher seam and
     # strips stale provider auth env (e.g. ANTHROPIC_API_KEY) so subscription
@@ -629,4 +699,5 @@ def invoke_phase(
     return PhaseInvocation(
         phase, result.returncode, result.stdout, result.stderr,
         parse_verdict(result.stdout, phase), parse_pr_url(result.stdout),
+        task_echo=parse_task_echo(result.stdout),
     )
