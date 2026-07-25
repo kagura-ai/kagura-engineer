@@ -8,6 +8,39 @@ While the project is in `0.x`, minor versions may carry breaking changes.
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-07-25
+
+### Added
+
+- `run` now fetches the assigned issue itself and injects its title and body
+  verbatim into every phase prompt, with an explicit instruction not to
+  substitute other work. Issue acquisition was previously delegated to the
+  actor, which local and open-source brains silently skipped — completing the
+  pipeline while implementing a task inferred from salient repository context.
+  (#92)
+- `run` verifies the `start` phase's one-line restatement of the assigned task
+  against the issue before dispatching the implement phase, so a substituted
+  task halts while it is still cheap. The new `task_echo` configuration field
+  selects `gate` (default), `warn`, or `off`. Both guards fail open: an
+  unreadable issue or an unscorable title forfeits the hardening rather than
+  failing the run, and a dropped marker counts as unverifiable rather than
+  mismatched. (#92)
+- `docs/commands.md`, `docs/configuration.md`, `docs/headless-permissions.md`,
+  and `docs/development.md` — the reference material relocated out of the
+  README. (#101)
+
+### Changed
+
+- **Every markdown link in the repository is now an absolute `https://` URL.**
+  `README.md` is the PyPI long description, and PyPI renders it standalone: it
+  resolves no relative paths, strips heading `id` attributes so intra-page
+  anchors fail, and `docs/` is excluded from the sdist. Six links were dead on
+  the published project page, including both LICENSE links and the changelog.
+  (#101)
+- The README is reduced from 442 to 127 lines and now works as a landing page;
+  no documented behaviour was lost, and `tests/test_readme.py` enforces link
+  absoluteness, link resolution, and the length cap. (#101)
+
 ## [0.6.0] — 2026-07-16
 
 ### Added
@@ -290,7 +323,8 @@ First public release. `kagura-engineer` is a `0.x` autonomous coding harness ove
   just `profile` + `memory_backend: local`. They stay required for the (default)
   cloud backend.
 
-[Unreleased]: https://github.com/kagura-ai/kagura-engineer/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/kagura-ai/kagura-engineer/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/kagura-ai/kagura-engineer/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/kagura-ai/kagura-engineer/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/kagura-ai/kagura-engineer/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/kagura-ai/kagura-engineer/compare/v0.4.0...v0.4.1
