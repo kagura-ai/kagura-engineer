@@ -55,13 +55,21 @@ agent_id: ""
 # Ollama endpoint for the cost-free reviewer.
 ollama_url: "http://localhost:11434"
 
-# --- In-loop code review (run/goal implement phase) ---
+# --- In-loop code review (run implement phase) ---
 # code_review: auto | always | never — whether the brain runs /code-review over
 #   the diff (auto = brain decides from diff size / risk / tests; default).
 # effort: low | medium | high — the effort hint passed to /code-review.
 # review:
 #   code_review: auto
 #   effort: medium
+
+# --- Task-fidelity gate ---
+# gate | warn | off — what to do when the start phase's one-line restatement of
+#   the task does not match the assigned issue. "gate" (default) halts before the
+#   implement phase; "warn" only reports it; "off" disables the check. Mainly
+#   matters for local/OSS brains, which are the ones observed to substitute a
+#   different task.
+# task_echo: gate
 """
 
 

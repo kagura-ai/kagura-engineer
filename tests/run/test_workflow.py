@@ -933,3 +933,123 @@ def test_persist_phase_stdout_returns_none_on_unwritable_path(tmp_path):
     blocker.write_text("not a dir")  # .kagura/ parent can't be created under a file
     inv = PhaseInvocation("ship", 0, "x", "", "green", None)
     assert workflow.persist_phase_stdout(blocker, inv) is None
+
+
+# --- verbatim issue injection + task echo (issue #92) -------------------------
+# OSS brains completed the pipeline but implemented an unrelated task because
+# issue acquisition was delegated to the model. The harness now fetches the
+# issue and injects it verbatim into every phase prompt, and asks the start
+# phase to restate the task so the orchestrator can gate before implement.
+
+
+def _brief(title="Add tetris high-score persistence", body="Persist across reloads."):
+    from kagura_engineer.run.issue import IssueBrief
+    return IssueBrief(number=42, title=title, body=body)
+
+
+def test_build_prompt_injects_the_issue_verbatim_for_every_phase():
+    for phase in ("start", "implement", "ship"):
+        prompt = workflow.build_prompt(phase, 42, [], brief=_brief())
+        assert "Add tetris high-score persistence" in prompt, phase
+        assert "Persist across reloads." in prompt, phase
+        assert "BEGIN ISSUE #42" in prompt and "END ISSUE #42" in prompt, phase
+
+
+def test_build_prompt_without_a_brief_keeps_the_pre_92_shape():
+    # gh unavailable → the brief is None and the prompt degrades to the
+    # issue-number-only form it had before this feature.
+    prompt = workflow.build_prompt("implement", 42, [])
+    assert "BEGIN ISSUE" not in prompt
+    assert "issue #42" in prompt
+
+
+def test_build_prompt_with_a_brief_forbids_substituting_another_task():
+    prompt = workflow.build_prompt("implement", 42, [], brief=_brief())
+    assert "do not substitute" in prompt.lower()
+
+
+def test_build_prompt_start_requests_the_task_echo_marker():
+    prompt = workflow.build_prompt("start", 42, [], brief=_brief())
+    assert "KAGURA_TASK=" in prompt
+
+
+def test_build_prompt_start_requests_no_task_echo_without_a_brief():
+    # Nothing to compare the echo against, so asking for it is pure noise.
+    assert "KAGURA_TASK=" not in workflow.build_prompt("start", 42, [])
+
+
+def test_build_prompt_non_start_phases_do_not_request_the_task_echo():
+    # The gate fires between start and implement; later echoes are unused.
+    for phase in ("implement", "ship"):
+        assert "KAGURA_TASK=" not in workflow.build_prompt(phase, 42, [], brief=_brief())
+
+
+def test_task_echo_marker_precedes_the_verdict_pair_in_the_prompt():
+    # Ordering is load-bearing: the issue-#54 pair regex requires VERDICT to be
+    # immediately followed by PR_URL, so the task line must be asked for above
+    # them or every start phase would lose its spoof-hardened pair parse.
+    prompt = workflow.build_prompt("start", 42, [], brief=_brief())
+    assert prompt.index("KAGURA_TASK=") < prompt.index("KAGURA_VERDICT=")
+
+
+def test_parse_task_echo_reads_the_marker():
+    out = "work…\nKAGURA_TASK=Persist the tetris high score\nKAGURA_VERDICT=green\nKAGURA_PR_URL=-"
+    assert workflow.parse_task_echo(out) == "Persist the tetris high score"
+
+
+def test_parse_task_echo_returns_none_when_absent():
+    assert workflow.parse_task_echo("KAGURA_VERDICT=green\nKAGURA_PR_URL=-") is None
+
+
+def test_parse_task_echo_returns_none_for_empty_output():
+    assert workflow.parse_task_echo("") is None
+
+
+def test_parse_task_echo_last_marker_wins():
+    out = "KAGURA_TASK=first\nnoise\nKAGURA_TASK=second\nKAGURA_VERDICT=green\nKAGURA_PR_URL=-"
+    assert workflow.parse_task_echo(out) == "second"
+
+
+def test_parse_task_echo_ignores_a_marker_buried_far_up_the_transcript():
+    # Same tail anchoring as the verdict markers: a KAGURA_TASK line quoted deep
+    # in the transcript (e.g. the model echoing the prompt's own instructions)
+    # is noise, not the closing contract.
+    out = "KAGURA_TASK=quoted from the prompt\n" + ("filler\n" * 2000) + "KAGURA_VERDICT=green"
+    assert workflow.parse_task_echo(out) is None
+
+
+def test_task_echo_line_does_not_break_verdict_or_pr_parsing():
+    out = "KAGURA_TASK=Persist the tetris high score\nKAGURA_VERDICT=green\nKAGURA_PR_URL=https://x/pull/1"
+    assert workflow.parse_verdict(out) == "green"
+    assert workflow.parse_pr_url(out) == "https://x/pull/1"
+
+
+def test_invoke_phase_threads_the_brief_into_the_prompt(tmp_path):
+    prompts: list[str] = []
+
+    def _invoke(prompt, **kw):
+        prompts.append(prompt)
+        class _R:
+            returncode = 0
+            stdout = "KAGURA_TASK=Persist the score\nKAGURA_VERDICT=green\nKAGURA_PR_URL=-"
+            stderr = ""
+            timed_out = False
+            def detail(self): return ""
+        return _R()
+
+    call = BrainCall("fake", SimpleNamespace(invoke=_invoke), supports_mcp=False)
+    inv = invoke_phase("start", 42, tmp_path, [], brain_call=call, brief=_brief())
+    assert "Add tetris high-score persistence" in prompts[0]
+    assert inv.task_echo == "Persist the score"
+
+
+def test_invoke_phase_task_echo_is_none_when_the_marker_is_dropped(tmp_path):
+    call = _fake_brain_call(stdout="KAGURA_VERDICT=green\nKAGURA_PR_URL=-")
+    inv = invoke_phase("start", 42, tmp_path, [], brain_call=call, brief=_brief())
+    assert inv.task_echo is None
+
+
+def test_invoke_phase_timeout_reports_no_task_echo(tmp_path):
+    call = _fake_brain_call(stdout="KAGURA_TASK=x", timed_out=True, returncode=124)
+    inv = invoke_phase("start", 42, tmp_path, [], brain_call=call, brief=_brief())
+    assert inv.timed_out and inv.task_echo is None
